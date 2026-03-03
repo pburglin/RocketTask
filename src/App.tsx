@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Play, Pause, CheckCircle2 } from 'lucide-react'
+import { CheckCircle2, Pause, Pencil, Play } from 'lucide-react'
 import { db, type Task, type TaskStatus } from './lib/db'
 import {
   cryptoConstants,
@@ -14,7 +14,7 @@ import {
   hashPassword,
   randomBytes,
 } from './lib/crypto'
-import { tasksToCsv } from './lib/reporting'
+import { generateWeeklyReport, tasksToCsv } from './lib/reporting'
 import {
   defaultTaskQuery,
   filterAndSortTasks,
@@ -33,23 +33,21 @@ function App() {
   const [password, setPassword] = useState('')
   const [authError, setAuthError] = useState('')
   const [key, setKey] = useState<CryptoKey | null>(null)
+
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [labelsInput, setLabelsInput] = useState('')
+  const [editingTaskId, setEditingTaskId] = useState<number | null>(null)
+
   const [taskQuery, setTaskQuery] = useState<TaskQuery>(defaultTaskQuery)
-  const [activeTaskId, setActiveTaskId] = useState<number | null>(null)
   const [descriptionByTask, setDescriptionByTask] = useState<Record<number, string>>({})
+  const [weeklyReportText, setWeeklyReportText] = useState('')
 
   const tasks = useLiveQuery(() => db.tasks.toArray(), [], [])
+  const timeLogs = useLiveQuery(() => db.timeLogs.toArray(), [], [])
 
-  const activeLog = useLiveQuery(
-    async () => {
-      if (!activeTaskId) return null
-      return db.timeLogs.where({ taskId: activeTaskId, endedAt: undefined }).first()
-    },
-    [activeTaskId],
-    null,
-  )
+  const activeLog = useLiveQuery(async () => db.timeLogs.filter((log) => !log.endedAt).first(), [], null)
+  const activeTaskId = activeLog?.taskId ?? null
 
   const availableLabels = useMemo(
     () => Array.from(new Set(tasks.flatMap((task) => task.tags.map(normalizeLabel)))).sort(),
@@ -144,13 +142,34 @@ function App() {
     }
   }
 
-  async function addTask(event: FormEvent<HTMLFormElement>) {
+  function resetTaskForm() {
+    setEditingTaskId(null)
+    setTitle('')
+    setDescription('')
+    setLabelsInput('')
+  }
+
+  async function submitTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
     if (!key || !title.trim()) return
 
     const now = new Date().toISOString()
     const cipherText = description.trim() ? await encryptText(description.trim(), key) : undefined
+
+    if (editingTaskId) {
+      const existingTask = tasks.find((task) => task.id === editingTaskId)
+      const nextStatus = existingTask?.status ?? 'todo'
+      await db.tasks.update(editingTaskId, {
+        title: title.trim(),
+        descriptionCiphertext: cipherText,
+        tags: parseLabelsInput(labelsInput),
+        status: nextStatus,
+        updatedAt: now,
+      })
+      resetTaskForm()
+      return
+    }
 
     await db.tasks.add({
       title: title.trim(),
@@ -161,48 +180,50 @@ function App() {
       updatedAt: now,
     })
 
-    setTitle('')
-    setDescription('')
-    setLabelsInput('')
+    resetTaskForm()
+  }
+
+  function startEditTask(task: Task) {
+    setEditingTaskId(task.id ?? null)
+    setTitle(task.title)
+    setDescription((task.id && descriptionByTask[task.id]) || '')
+    setLabelsInput(task.tags.join(', '))
+  }
+
+  async function closeAnyRunningLog() {
+    const runningLog = await db.timeLogs.filter((log) => !log.endedAt).first()
+    if (!runningLog?.id) return
+
+    const endedAt = new Date().toISOString()
+    const durationSeconds = Math.max(
+      0,
+      Math.floor((new Date(endedAt).getTime() - new Date(runningLog.startedAt).getTime()) / 1000),
+    )
+
+    await db.timeLogs.update(runningLog.id, { endedAt, durationSeconds })
+    await db.tasks.update(runningLog.taskId, { status: 'todo', updatedAt: endedAt })
   }
 
   async function toggleTaskTimer(task: Task) {
     if (!task.id) return
 
     if (activeTaskId === task.id) {
-      const runningLog = await db.timeLogs.where({ taskId: task.id, endedAt: undefined }).first()
-      if (!runningLog?.id) return
-
-      const endedAt = new Date().toISOString()
-      const durationSeconds = Math.max(
-        0,
-        Math.floor((new Date(endedAt).getTime() - new Date(runningLog.startedAt).getTime()) / 1000),
-      )
-
-      await db.timeLogs.update(runningLog.id, { endedAt, durationSeconds })
-      await db.tasks.update(task.id, { status: 'todo', updatedAt: endedAt })
-      setActiveTaskId(null)
+      await closeAnyRunningLog()
       return
     }
 
-    if (activeTaskId) {
-      const previousTask = tasks.find((t) => t.id === activeTaskId)
-      if (previousTask) {
-        await toggleTaskTimer(previousTask)
-      }
-    }
+    await closeAnyRunningLog()
 
     const startedAt = new Date().toISOString()
     await db.timeLogs.add({ taskId: task.id, startedAt })
     await db.tasks.update(task.id, { status: 'in_progress', updatedAt: startedAt })
-    setActiveTaskId(task.id)
   }
 
   async function markDone(task: Task) {
     if (!task.id) return
 
     if (activeTaskId === task.id) {
-      await toggleTaskTimer(task)
+      await closeAnyRunningLog()
     }
 
     await db.tasks.update(task.id, { status: 'done', updatedAt: new Date().toISOString() })
@@ -250,6 +271,11 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
+  function generateCurrentWeeklyReport() {
+    const report = generateWeeklyReport(filteredTasks, timeLogs, descriptionByTask)
+    setWeeklyReportText(report.text)
+  }
+
   if (authState === 'loading') {
     return <div className="mx-auto min-h-screen max-w-xl p-6 text-slate-200">Loading…</div>
   }
@@ -290,11 +316,26 @@ function App() {
     <main className="mx-auto min-h-screen w-full max-w-4xl p-4 sm:p-6">
       <header className="mb-6">
         <h1 className="text-2xl font-semibold text-slate-100">Task Reporter MVP</h1>
-        <p className="text-sm text-slate-400">Universal filters power tasks, widgets, and exports.</p>
+        <p className="text-sm text-slate-400">Universal filters power tasks, widgets, reports, and exports.</p>
       </header>
 
       <section className="mb-6 rounded-2xl border border-slate-700 bg-slate-900 p-4">
-        <form className="space-y-3" onSubmit={addTask}>
+        <form className="space-y-3" onSubmit={submitTask}>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+              {editingTaskId ? 'Edit Task' : 'Create Task'}
+            </h2>
+            {editingTaskId ? (
+              <button
+                type="button"
+                className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-200 hover:border-rose-500"
+                onClick={resetTaskForm}
+              >
+                Cancel Edit
+              </button>
+            ) : null}
+          </div>
+
           <input
             className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100 outline-none focus:border-cyan-500"
             placeholder="Task title"
@@ -338,7 +379,7 @@ function App() {
             className="rounded-lg bg-cyan-500 px-4 py-2 font-medium text-slate-900 transition hover:bg-cyan-400"
             type="submit"
           >
-            Add task
+            {editingTaskId ? 'Save task changes' : 'Add task'}
           </button>
         </form>
       </section>
@@ -473,9 +514,18 @@ function App() {
 
                 <div className="flex items-center gap-2">
                   <button
+                    className="rounded-lg border border-slate-700 p-2 text-slate-300 hover:border-violet-500"
+                    onClick={() => startEditTask(task)}
+                    type="button"
+                    title="Edit task"
+                  >
+                    <Pencil size={16} />
+                  </button>
+                  <button
                     className="rounded-lg border border-slate-700 p-2 text-slate-300 hover:border-cyan-500"
                     onClick={() => void toggleTaskTimer(task)}
                     type="button"
+                    title={activeTaskId === task.id ? 'Pause timer' : 'Start timer'}
                   >
                     {activeTaskId === task.id ? <Pause size={16} /> : <Play size={16} />}
                   </button>
@@ -483,6 +533,7 @@ function App() {
                     className="rounded-lg border border-slate-700 p-2 text-slate-300 hover:border-emerald-500"
                     onClick={() => void markDone(task)}
                     type="button"
+                    title="Mark done"
                   >
                     <CheckCircle2 size={16} />
                   </button>
@@ -502,22 +553,43 @@ function App() {
       <section className="mt-6 rounded-xl border border-slate-700 bg-slate-900 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="font-medium text-slate-100">Report/Export (uses same filters)</h3>
-            <p className="text-sm text-slate-400">Exported CSV exactly matches currently visible tasks and sort order.</p>
+            <h3 className="font-medium text-slate-100">Weekly Report + Export</h3>
+            <p className="text-sm text-slate-400">
+              Weekly report and CSV both use the exact visible filtered/sorted task set.
+            </p>
           </div>
-          <button
-            type="button"
-            className="rounded-lg bg-emerald-500 px-3 py-2 text-sm font-medium text-slate-900 hover:bg-emerald-400"
-            onClick={exportFilteredCsv}
-          >
-            Export visible as CSV
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-lg border border-cyan-500 px-3 py-2 text-sm font-medium text-cyan-100 hover:bg-cyan-500/20"
+              onClick={generateCurrentWeeklyReport}
+            >
+              Generate weekly report
+            </button>
+            <button
+              type="button"
+              className="rounded-lg bg-emerald-500 px-3 py-2 text-sm font-medium text-slate-900 hover:bg-emerald-400"
+              onClick={exportFilteredCsv}
+            >
+              Export visible as CSV
+            </button>
+          </div>
         </div>
+
+        {weeklyReportText ? (
+          <div className="mt-3 rounded-lg border border-slate-700 bg-slate-950/60 p-3">
+            <textarea
+              readOnly
+              value={weeklyReportText}
+              className="h-48 w-full resize-y bg-transparent text-sm text-slate-200 outline-none"
+            />
+          </div>
+        ) : null}
       </section>
 
       {activeLog ? (
         <footer className="mt-6 rounded-lg border border-cyan-500/40 bg-cyan-500/10 p-3 text-sm text-cyan-100">
-          Timer running since {new Date(activeLog.startedAt).toLocaleTimeString()}.
+          Timer running since {new Date(activeLog.startedAt).toLocaleTimeString()} (persists across refresh).
         </footer>
       ) : null}
     </main>

@@ -7,10 +7,10 @@
 - **Network Access:** `0.0.0.0` (to be enabled for local network testing)
 
 ## Current Status
-- **Current Phase:** Phase 2: Core Task Management
-- **Active Task:** task_dashboard
-- **Git Status:** Implemented universal task query engine, labeling, and CSV export.
+- **Current Phase:** Phase 4: Reporting & Export
+- **Active Task:** MVP stabilization and polish
+- **Git Status:** Implemented functional dashboard, create/edit task form, persistent timer start/pause, and weekly report generator while preserving universal filter/sort + labels + CSV export.
 
 ## Metrics
-- **Completion:** 30%
-- **Blocks:** None
+- **Completion:** 65%
+- **Blocks:** `vitest` currently hangs in this runtime (Node v25.7.0) and does not return results; typecheck and lint pass.
