@@ -9,8 +9,8 @@
 ## Phase 2: Core Task Management
 - [ ] Task Dashboard (Mobile-first, above-the-fold priority) <!-- id: task_dashboard -->
 - [ ] Task Creation/Edit Form (Flexible metadata, tags, quick labeling UX with suggestions) <!-- id: task_form -->
-- [ ] Universal Task Filter Engine (query by title, description, labels, stakeholders, status, dates, and custom fields) <!-- id: task_filter_engine -->
-- [ ] Reusable Filter UI (free-text + field filters/chips, saved filter presets optional) <!-- id: task_filter_ui -->
+- [ ] Universal Task Query Engine (filter + sort by title, description, labels, stakeholders, status, deadline, next checkpoint, dates, and custom fields) <!-- id: task_filter_engine -->
+- [ ] Reusable Filter/Sort UI (free-text + field filters/chips + sort controls; saved presets optional) <!-- id: task_filter_ui -->
 - [ ] Task Timer (Start/Pause logic with TimeLog persistence) <!-- id: task_timer -->
 
 ## Phase 3: AI & Integrations
@@ -19,7 +19,7 @@
 
 ## Phase 4: Reporting & Export
 - [ ] Weekly Report Generator (Formatted summary + time stats) <!-- id: task_report_gen -->
-- [ ] Apply universal filters to reports/export (same criteria as task lists/dashboard) <!-- id: task_report_filters -->
+- [ ] Apply universal filter/sort model to reports/export (same criteria/order as task lists/dashboard) <!-- id: task_report_filters -->
 - [ ] Export via Mailto & CSV Download <!-- id: task_export -->
 
 ## Phase 5: Polish & UX

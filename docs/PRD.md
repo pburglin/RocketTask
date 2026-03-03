@@ -18,7 +18,7 @@ A mobile-friendly, frontend-only web application designed to help users capture,
 - **Creation & Editing:** Quickly add tasks with rich metadata.
 - **Task Timer:** Start/pause timer on each task to accurately track time spent.
 - **Flexible Metadata (Tags/Labels):** Custom tags to denote type (e.g., "internal work", "unplanned work", "project A") and health status (e.g., "on track", "at risk"). Labeling must be fast and low-friction (keyboard-first quick-add, suggestions/autocomplete from existing labels, and multi-select).
-- **Universal Search & Filtering:** Fast filtering across any task field (title, description, labels/tags, stakeholders, status, dates, next action, and custom metadata). Filtering experience should support both free-text search and field-specific filters.
+- **Universal Search, Filtering & Sorting:** Fast filtering and sorting across any task field (title, description, labels/tags, stakeholders, status, dates including deadline and next checkpoint, next action, and custom metadata). The experience should support free-text search, field-specific filters, and field-based sort controls (ascending/descending).
 - **Task Attributes:**
   - Description / Title
   - Next Checkpoint (Date)
@@ -29,7 +29,7 @@ A mobile-friendly, frontend-only web application designed to help users capture,
 
 **B. Dashboard & Views**
 - **Main Dashboard:** Displays active tasks. Ability to sort and filter tasks by next checkpoint, health status, project, etc.
-- **Global Filter Consistency:** The same filter/search model must be reusable across task list views, dashboard widgets, and report generation screens so users get consistent results everywhere.
+- **Global Filter/Sort Consistency:** The same filter/search/sort model must be reusable across task list views, dashboard widgets, and report generation screens so users get consistent results everywhere.
 - **Common Context:** A settings area to define "Common Context" (corporate terminology, acronyms, team names) that the AI and report generator can use for better formatting and accuracy.
 
 **C. Integrations & Import**
