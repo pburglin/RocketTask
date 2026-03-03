@@ -5,7 +5,6 @@ PROJECT_DIR="/Users/bob1/Documents/projects/task-reporter-app"
 cd "$PROJECT_DIR" || exit
 
 # 1. Identify current task
-# Ensure we get the ID correctly even if there's extra whitespace or formatting
 CURRENT_TASK_ID=$(grep "Active Task:" STATE.md | cut -d':' -f2 | xargs | sed 's/\*\*//g')
 
 if [ -z "$CURRENT_TASK_ID" ]; then
@@ -15,15 +14,17 @@ fi
 
 echo "Running autonomous implementation for: $CURRENT_TASK_ID"
 
-# 2. Spawn implementation sub-agent (ACP coding session)
-# OpenClaw sessions_spawn uses JSON params when called via tool. 
-# Since I'm in a shell script, I'll use the OpenClaw CLI equivalent.
-# Note: 'openclaw spawn' is the CLI command for sessions_spawn.
-openclaw spawn \
-  --mode run \
-  --runtime acp \
-  --task "Implement task $CURRENT_TASK_ID in $PROJECT_DIR. Follow docs/PRD.md and docs/ARCHITECTURE.md strictly. Run 'npm run build' to verify. Once done: 1. Update TASKS.md (check off the item). 2. Update STATE.md with the next task ID from TASKS.md. 3. Commit changes with a clear message." \
-  --cwd "$PROJECT_DIR" \
-  --label "coder-$CURRENT_TASK_ID"
+# 2. Trigger implementation via OpenClaw 'cron run' or 'agent'
+# Since we want to spawn an ACP session, the best way from a script without a direct 'spawn' CLI
+# is to send a message to the main agent (me) to trigger it, or use the 'cron add' mechanism
+# for a one-shot immediate job that targets an isolated session.
 
-echo "Implementation session spawned."
+# However, since I am ALREADY the agent, I can just call the sessions_spawn tool directly
+# if I were running this logic inside my turn. Since this is a CRON script, 
+# it's better to use the OpenClaw 'agent' CLI to send a command to the gateway.
+
+openclaw agent \
+  --message "Implement task $CURRENT_TASK_ID in $PROJECT_DIR using an ACP session. Follow docs/PRD.md and docs/ARCHITECTURE.md. Update TASKS.md and STATE.md when done." \
+  --deliver
+
+echo "Task implementation request sent to OpenClaw gateway."
