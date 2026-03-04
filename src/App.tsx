@@ -385,6 +385,9 @@ function App() {
 
   async function deleteEditingTask() {
     if (!editingTaskId) return
+    const confirmed = window.confirm('Delete this task permanently? This cannot be undone.')
+    if (!confirmed) return
+
     await db.timeLogs.where('taskId').equals(editingTaskId).delete()
     await db.tasks.delete(editingTaskId)
     resetTaskForm()
@@ -692,8 +695,12 @@ function App() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button className="rounded-lg border border-slate-700 p-2 text-slate-300" onClick={() => { startEditTask(task); setActivePanel('create') }} type="button" title="Edit task"><Pencil size={16} /></button>
-                  <button className="rounded-lg border border-slate-700 p-2 text-slate-300" onClick={() => void toggleTaskTimer(task)} type="button" title={activeTaskId === task.id ? 'Pause timer' : 'Start timer'}>{activeTaskId === task.id ? <Pause size={16} /> : <Play size={16} />}</button>
-                  <button className="rounded-lg border border-slate-700 p-2 text-slate-300" onClick={() => void markDone(task)} type="button" title="Mark done"><CheckCircle2 size={16} /></button>
+                  {task.status !== 'done' ? (
+                    <>
+                      <button className="rounded-lg border border-slate-700 p-2 text-slate-300" onClick={() => void toggleTaskTimer(task)} type="button" title={activeTaskId === task.id ? 'Pause timer' : 'Start timer'}>{activeTaskId === task.id ? <Pause size={16} /> : <Play size={16} />}</button>
+                      <button className="rounded-lg border border-slate-700 p-2 text-slate-300" onClick={() => void markDone(task)} type="button" title="Mark done"><CheckCircle2 size={16} /></button>
+                    </>
+                  ) : null}
                 </div>
               </div>
               {task.id && descriptionByTask[task.id] ? <p className="mt-3 text-sm text-slate-300">{descriptionByTask[task.id]}</p> : null}
@@ -726,7 +733,13 @@ function App() {
               </div>
               <input className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" placeholder="Suggested next action" value={nextAction} onChange={(event) => setNextAction(event.target.value)} />
               {editingTaskId ? <label className="space-y-1 text-xs text-slate-300"><span className="block">Tracked time correction (minutes)</span><input className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" type="number" min={0} value={trackedMinutesInput} onChange={(event) => setTrackedMinutesInput(event.target.value)} /></label> : null}
-              <div className="flex gap-2"><button className="rounded-lg bg-cyan-500 px-4 py-2 font-medium text-slate-900" type="submit">{editingTaskId ? 'Save changes' : 'Add task'}</button>{editingTaskId ? <button type="button" className="rounded-lg border border-rose-500 px-4 py-2 text-rose-300" onClick={() => void deleteEditingTask()}>Delete</button> : null}<button type="button" className="rounded-lg border border-slate-600 px-4 py-2 text-slate-200" onClick={() => { resetTaskForm(); setActivePanel(null) }}>Close</button></div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex gap-2">
+                  <button className="rounded-lg bg-cyan-500 px-4 py-2 font-medium text-slate-900" type="submit">{editingTaskId ? 'Save' : 'Add task'}</button>
+                  <button type="button" className="rounded-lg border border-slate-600 px-4 py-2 text-slate-200" onClick={() => { resetTaskForm(); setActivePanel(null) }}>Close</button>
+                </div>
+                {editingTaskId ? <button type="button" className="rounded-lg border border-rose-500 px-4 py-2 text-rose-300" onClick={() => void deleteEditingTask()}>Delete</button> : null}
+              </div>
             </form>
           ) : null}
 
