@@ -876,7 +876,12 @@ function App() {
             </button>
           </div>
         ) : null}
-        {aiPlanText ? <pre className="mt-2 whitespace-pre-wrap rounded-lg border border-slate-700 bg-slate-900/70 p-2 text-xs text-slate-200">{aiPlanText}</pre> : null}
+        {aiPlanText ? (
+          <div
+            className="mt-2 rounded-lg border border-slate-700 bg-slate-900/70 p-3 text-xs text-slate-200"
+            dangerouslySetInnerHTML={{ __html: markdownToHtml(aiPlanText) }}
+          />
+        ) : null}
         {!ENCRYPTION_AVAILABLE ? (
           <p className="mt-2 text-xs text-amber-300">Running in non-secure context (HTTP on LAN). Notes are stored in browser storage in non-WebCrypto mode.</p>
         ) : null}
@@ -1063,6 +1068,82 @@ function App() {
       </nav>
     </main>
   )
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+}
+
+function markdownToHtml(markdown: string): string {
+  const lines = markdown.split('\n')
+  const html: string[] = []
+  let inList = false
+
+  for (const raw of lines) {
+    const line = escapeHtml(raw.trim())
+
+    if (!line) {
+      if (inList) {
+        html.push('</ul>')
+        inList = false
+      }
+      continue
+    }
+
+    if (line.startsWith('### ')) {
+      if (inList) {
+        html.push('</ul>')
+        inList = false
+      }
+      html.push(`<h3 class="mb-1 mt-2 text-sm font-semibold text-cyan-200">${line.slice(4)}</h3>`)
+      continue
+    }
+
+    if (line.startsWith('## ')) {
+      if (inList) {
+        html.push('</ul>')
+        inList = false
+      }
+      html.push(`<h2 class="mb-1 mt-2 text-sm font-semibold text-cyan-100">${line.slice(3)}</h2>`)
+      continue
+    }
+
+    if (line.startsWith('# ')) {
+      if (inList) {
+        html.push('</ul>')
+        inList = false
+      }
+      html.push(`<h1 class="mb-1 mt-2 text-sm font-semibold text-cyan-50">${line.slice(2)}</h1>`)
+      continue
+    }
+
+    if (line.startsWith('- ') || line.startsWith('* ')) {
+      if (!inList) {
+        html.push('<ul class="mb-2 ml-4 list-disc space-y-1">')
+        inList = true
+      }
+      html.push(`<li>${line.slice(2)}</li>`)
+      continue
+    }
+
+    if (inList) {
+      html.push('</ul>')
+      inList = false
+    }
+
+    html.push(`<p class="mb-2 leading-relaxed">${line}</p>`)
+  }
+
+  if (inList) html.push('</ul>')
+
+  return html
+    .join('')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code class="rounded bg-slate-800 px-1 py-0.5">$1</code>')
 }
 
 function formatDurationHms(totalSeconds: number): string {
