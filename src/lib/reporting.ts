@@ -83,13 +83,19 @@ export function generateWeeklyReport(
 
   const includedTaskIds = new Set(tasks.map((task) => task.id).filter((id): id is number => typeof id === 'number'))
 
-  const totalTrackedSeconds = timeLogs
+  const weeklyLogs = timeLogs
     .filter((log) => includedTaskIds.has(log.taskId))
     .filter((log) => {
       const started = new Date(log.startedAt)
       return started >= weekStart && started <= weekEnd
     })
-    .reduce((sum, log) => sum + (log.durationSeconds ?? 0), 0)
+
+  const totalTrackedSeconds = weeklyLogs.reduce((sum, log) => sum + (log.durationSeconds ?? 0), 0)
+
+  const timeByTaskId = weeklyLogs.reduce<Record<number, number>>((acc, log) => {
+    acc[log.taskId] = (acc[log.taskId] ?? 0) + (log.durationSeconds ?? 0)
+    return acc
+  }, {})
 
   const doneCount = tasks.filter((task) => task.status === 'done').length
   const inProgressCount = tasks.filter((task) => task.status === 'in_progress').length
@@ -109,6 +115,20 @@ export function generateWeeklyReport(
     return `- ${task.title} (${task.status})${labels}${scheduleSnippet}${descriptionSnippet}`
   })
 
+  const timeBreakdownLines = tasks
+    .map((task) => ({
+      title: task.title,
+      seconds: task.id ? timeByTaskId[task.id] ?? 0 : 0,
+    }))
+    .filter((item) => item.seconds > 0)
+    .sort((a, b) => b.seconds - a.seconds)
+    .map((item) => {
+      const pct = totalTrackedSeconds > 0 ? Math.round((item.seconds / totalTrackedSeconds) * 100) : 0
+      return `- ${item.title}: ${formatDuration(item.seconds)} (${pct}%)`
+    })
+
+  const topTaskLine = timeBreakdownLines[0] ?? '- No tracked time yet this week.'
+
   const weekLabel = `${weekStart.toLocaleDateString()} - ${weekEnd.toLocaleDateString()}`
   const generatedAt = now.toISOString()
   const summary = [
@@ -118,6 +138,10 @@ export function generateWeeklyReport(
     `Visible tasks: ${tasks.length}`,
     `Done: ${doneCount} | In progress: ${inProgressCount} | Todo: ${todoCount}`,
     `Tracked time this week: ${formatDuration(totalTrackedSeconds)}`,
+    `Top time focus: ${topTaskLine.replace(/^- /, '')}`,
+    '',
+    'Time breakdown by task:',
+    ...(timeBreakdownLines.length > 0 ? timeBreakdownLines : ['- No tracked time yet.']),
     '',
     'Tasks:',
     ...(lines.length > 0 ? lines : ['- No tasks match the current filters.']),

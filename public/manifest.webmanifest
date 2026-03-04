@@ -1,0 +1,17 @@
+{
+  "name": "RocketTask",
+  "short_name": "RocketTask",
+  "description": "Simple agile task tool for fast capture, execution, and reporting.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
