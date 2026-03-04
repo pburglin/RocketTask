@@ -726,7 +726,7 @@ function App() {
                 {isInstalled ? <span className="text-emerald-300">Installed ✅</span> : null}
               </div>
               {installMessage ? <p className="text-xs text-cyan-200">{installMessage}</p> : null}
-              <p>PWA tip: if install prompt does not appear, open browser menu and use <strong>Add to Home Screen</strong>. Note: full install prompts typically require HTTPS (or localhost).</p>
+              <p>PWA tip (iPhone Safari): tap <strong>Share</strong> → <strong>Add to Home Screen</strong>. Safari usually does not show the install prompt button automatically like Chrome does.</p>
               <p>Vibe-coded from a phone by <strong>Pedro Burglin</strong>.</p>
             </div>
           ) : null}
