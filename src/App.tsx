@@ -74,6 +74,7 @@ function App() {
   const [enablePasskeyOnSetup, setEnablePasskeyOnSetup] = useState(true)
   const [passkeyBusy, setPasskeyBusy] = useState(false)
   const [passkeyAttempted, setPasskeyAttempted] = useState(false)
+  const [enablePasskeyOnUnlock, setEnablePasskeyOnUnlock] = useState(true)
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -89,6 +90,8 @@ function App() {
   const [descriptionByTask, setDescriptionByTask] = useState<Record<number, string>>({})
   const [weeklyReportText, setWeeklyReportText] = useState('')
   const [reportPeriod, setReportPeriod] = useState<'week' | 'month' | 'quarter' | 'year'>('week')
+  const [aiPlanText, setAiPlanText] = useState('')
+  const [aiPlanBusy, setAiPlanBusy] = useState(false)
 
   const [aiApiKey, setAiApiKey] = useState('')
   const [aiModel, setAiModel] = useState('nvidia /nemotron-3-nano-30b-a3b:free')
@@ -214,11 +217,13 @@ function App() {
       const alerts = await db.settings.get('alerts.enabled')
       const savedQuery = await db.settings.get('task.query')
       const passkeySetting = await db.settings.get('auth.passkeyEnabled')
+      const passkeyIdSetting = await db.settings.get('auth.passkeyId')
+      const passkeySecretSetting = await db.settings.get('auth.passkeySecret')
 
       setAiApiKey(savedKey?.value ?? '')
       setAiModel(savedModel?.value ?? 'nvidia /nemotron-3-nano-30b-a3b:free')
       setAlertEnabled(alerts?.value !== 'false')
-      setPasskeyEnabled(passkeySetting?.value === 'true')
+      setPasskeyEnabled(passkeySetting?.value === 'true' || (!!passkeyIdSetting?.value && !!passkeySecretSetting?.value))
 
       if (savedQuery?.value) {
         try {
@@ -421,6 +426,10 @@ function App() {
         return
       }
 
+      if (!passkeyEnabled && enablePasskeyOnUnlock && passkeySupportedNow) {
+        await registerPasskey(password)
+      }
+
       const derivedKey = await deriveAesKey(password, salt)
       setKey(derivedKey)
       setAuthState('ready')
@@ -569,6 +578,50 @@ function App() {
       setAiError(error instanceof Error ? error.message : 'AI rewrite failed')
     } finally {
       setAiBusy(false)
+    }
+  }
+
+  async function generateAiDailyPlan() {
+    if (!aiApiKey.trim()) return
+
+    try {
+      setAiPlanBusy(true)
+      const today = new Date().toISOString().slice(0, 10)
+      const taskLines = filteredTasks.map((task) => {
+        const tracked = task.id ? taskTrackedSeconds[task.id] ?? 0 : 0
+        return `- ${task.title} | status=${task.status} | deadline=${task.deadline ?? 'none'} | checkpoint=${task.nextCheckpoint ?? 'none'} | tracked=${formatDurationHms(tracked)} | next=${task.nextAction ?? 'none'}`
+      })
+
+      const prompt = `You are an execution coach. Build a concise daily plan from these filtered tasks for ${today}. Prioritize approaching/overdue deadlines and checkpoints. Return:\n1) Top 3 priorities\n2) Suggested order with time blocks\n3) Risks/blockers\n4) End-of-day checklist\n\nTasks:\n${taskLines.join('\n') || '- No tasks'}`
+
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${aiApiKey}`,
+        },
+        body: JSON.stringify({
+          model: aiModel || 'nvidia /nemotron-3-nano-30b-a3b:free',
+          messages: [
+            { role: 'system', content: 'You produce practical daily execution plans for engineering task management.' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.2,
+        }),
+      })
+
+      if (!response.ok) throw new Error(`AI planner failed (${response.status})`)
+      const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> }
+      setAiPlanText(data.choices?.[0]?.message?.content?.trim() || 'No plan returned.')
+
+      await db.settings.bulkPut([
+        { key: 'ai.apiKey', value: aiApiKey },
+        { key: 'ai.model', value: aiModel },
+      ])
+    } catch (error) {
+      setAiPlanText(error instanceof Error ? error.message : 'AI planner failed')
+    } finally {
+      setAiPlanBusy(false)
     }
   }
 
@@ -778,7 +831,7 @@ function App() {
       <main className="mx-auto flex min-h-screen w-full max-w-xl items-center p-6">
         <section className="w-full rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl shadow-black/30">
           <h1 className="text-2xl font-semibold text-slate-100">RocketTask</h1>
-          <p className="mt-2 text-sm text-slate-400">{authState === 'setup' ? 'Set a local password.' : 'Unlock with your password or passkey.'}</p>
+          <p className="mt-2 text-sm text-slate-400">{authState === 'setup' ? 'Set a local password.' : passkeyEnabled ? 'Trying Face ID / Touch ID automatically. Password fallback below.' : 'Unlock with your password.'}</p>
           {authState === 'locked' && passkeyEnabled ? (
             <button
               type="button"
@@ -786,7 +839,7 @@ function App() {
               onClick={() => void tryPasskeyUnlock()}
               disabled={passkeyBusy}
             >
-              {passkeyBusy ? 'Checking Face ID / Touch ID…' : 'Use Face ID / Touch ID'}
+              {passkeyBusy ? 'Checking Face ID / Touch ID…' : 'Retry Face ID / Touch ID'}
             </button>
           ) : null}
           <form className="mt-5 space-y-3" onSubmit={handleAuthSubmit}>
@@ -795,6 +848,12 @@ function App() {
               <label className="flex items-center gap-2 text-xs text-slate-300">
                 <input type="checkbox" checked={enablePasskeyOnSetup} onChange={(event) => setEnablePasskeyOnSetup(event.target.checked)} />
                 Enable PassKey login (Face ID / Touch ID)
+              </label>
+            ) : null}
+            {authState === 'locked' && passkeySupported && !passkeyEnabled ? (
+              <label className="flex items-center gap-2 text-xs text-slate-300">
+                <input type="checkbox" checked={enablePasskeyOnUnlock} onChange={(event) => setEnablePasskeyOnUnlock(event.target.checked)} />
+                Enable PassKey on this device after unlock
               </label>
             ) : null}
             {authError ? <p className="text-sm text-rose-400">{authError}</p> : null}
@@ -810,6 +869,14 @@ function App() {
       <header className="mb-4">
         <h1 className="flex items-center gap-2 text-2xl font-semibold text-slate-100"><ClipboardList size={24} /> RocketTask</h1>
         <p className="text-sm text-slate-400">Fast, focused, mobile-friendly task execution.</p>
+        {aiApiKey.trim() ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button type="button" className="rounded-lg border border-violet-500 px-3 py-1.5 text-xs text-violet-200" onClick={() => void generateAiDailyPlan()} disabled={aiPlanBusy}>
+              {aiPlanBusy ? 'Planning…' : 'AI Daily Planner'}
+            </button>
+          </div>
+        ) : null}
+        {aiPlanText ? <pre className="mt-2 whitespace-pre-wrap rounded-lg border border-slate-700 bg-slate-900/70 p-2 text-xs text-slate-200">{aiPlanText}</pre> : null}
         {!ENCRYPTION_AVAILABLE ? (
           <p className="mt-2 text-xs text-amber-300">Running in non-secure context (HTTP on LAN). Notes are stored in browser storage in non-WebCrypto mode.</p>
         ) : null}
