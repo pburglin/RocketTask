@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent, KeyboardEvent, ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -32,15 +32,48 @@ type InstallPromptEvent = Event & {
   prompt: () => Promise<void>
 }
 
+type AuthenticatorCredential = Credential & {
+  rawId: ArrayBuffer
+}
+
 const STATUSES: TaskStatus[] = ['todo', 'in_progress', 'done']
 const ENCRYPTION_AVAILABLE =
   typeof window !== 'undefined' && typeof window.crypto !== 'undefined' && !!window.crypto.subtle && window.isSecureContext
+
+function toBase64Url(bytes: Uint8Array): string {
+  const bin = String.fromCharCode(...bytes)
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+function fromBase64Url(value: string): Uint8Array {
+  const pad = value.length % 4 === 0 ? '' : '='.repeat(4 - (value.length % 4))
+  const base64 = value.replace(/-/g, '+').replace(/_/g, '/') + pad
+  const bin = atob(base64)
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0))
+}
+
+function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+}
+
+function encodeTextBase64(value: string): string {
+  return toBase64Url(new TextEncoder().encode(value))
+}
+
+function decodeTextBase64(value: string): string {
+  return new TextDecoder().decode(fromBase64Url(value))
+}
 
 function App() {
   const [authState, setAuthState] = useState<AuthState>('loading')
   const [password, setPassword] = useState('')
   const [authError, setAuthError] = useState('')
   const [key, setKey] = useState<CryptoKey | null>(null)
+  const [passkeySupported, setPasskeySupported] = useState(false)
+  const [passkeyEnabled, setPasskeyEnabled] = useState(false)
+  const [enablePasskeyOnSetup, setEnablePasskeyOnSetup] = useState(true)
+  const [passkeyBusy, setPasskeyBusy] = useState(false)
+  const [passkeyAttempted, setPasskeyAttempted] = useState(false)
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -86,8 +119,88 @@ function App() {
     [tasks],
   )
 
+  const passkeySupportedNow = typeof window !== 'undefined' && !!window.PublicKeyCredential && !!navigator.credentials
+
+  async function registerPasskey(passwordForUnlock: string) {
+    if (!passkeySupportedNow) return false
+
+    try {
+      const challenge = crypto.getRandomValues(new Uint8Array(32))
+      const userId = crypto.getRandomValues(new Uint8Array(16))
+
+      const credential = (await navigator.credentials.create({
+        publicKey: {
+          challenge,
+          rp: { name: 'RocketTask' },
+          user: {
+            id: userId,
+            name: 'rockettask-local-user',
+            displayName: 'RocketTask User',
+          },
+          pubKeyCredParams: [
+            { type: 'public-key', alg: -7 },
+            { type: 'public-key', alg: -257 },
+          ],
+          authenticatorSelection: {
+            authenticatorAttachment: 'platform',
+            residentKey: 'preferred',
+            userVerification: 'preferred',
+          },
+          timeout: 60000,
+          attestation: 'none',
+        },
+      })) as AuthenticatorCredential | null
+
+      if (!credential) return false
+
+      await db.settings.bulkPut([
+        { key: 'auth.passkeyEnabled', value: 'true' },
+        { key: 'auth.passkeyId', value: toBase64Url(new Uint8Array(credential.rawId)) },
+        { key: 'auth.passkeySecret', value: encodeTextBase64(passwordForUnlock) },
+      ])
+      setPasskeyEnabled(true)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const tryPasskeyUnlock = useCallback(async () => {
+    if (!passkeySupportedNow) return false
+    const idSetting = await db.settings.get('auth.passkeyId')
+    const secretSetting = await db.settings.get('auth.passkeySecret')
+    const saltSetting = await db.settings.get('auth.salt')
+
+    if (!idSetting?.value || !secretSetting?.value || !saltSetting?.value) return false
+
+    try {
+      setPasskeyBusy(true)
+      const challenge = crypto.getRandomValues(new Uint8Array(32))
+      await navigator.credentials.get({
+        publicKey: {
+          challenge,
+          allowCredentials: [{ id: asArrayBuffer(fromBase64Url(idSetting.value)), type: 'public-key' }],
+          userVerification: 'required',
+          timeout: 60000,
+        },
+      })
+
+      const unlockedPassword = decodeTextBase64(secretSetting.value)
+      const derivedKey = await deriveAesKey(unlockedPassword, decodeSalt(saltSetting.value))
+      setKey(derivedKey)
+      setAuthState('ready')
+      setAuthError('')
+      return true
+    } catch {
+      return false
+    } finally {
+      setPasskeyBusy(false)
+    }
+  }, [passkeySupportedNow])
+
   useEffect(() => {
     void (async () => {
+      setPasskeySupported(passkeySupportedNow)
       await db.ensureTaskDefaults()
 
       if (!ENCRYPTION_AVAILABLE) {
@@ -100,10 +213,12 @@ function App() {
       const savedModel = await db.settings.get('ai.model')
       const alerts = await db.settings.get('alerts.enabled')
       const savedQuery = await db.settings.get('task.query')
+      const passkeySetting = await db.settings.get('auth.passkeyEnabled')
 
       setAiApiKey(savedKey?.value ?? '')
       setAiModel(savedModel?.value ?? 'nvidia /nemotron-3-nano-30b-a3b:free')
       setAlertEnabled(alerts?.value !== 'false')
+      setPasskeyEnabled(passkeySetting?.value === 'true')
 
       if (savedQuery?.value) {
         try {
@@ -120,7 +235,14 @@ function App() {
 
       setQueryHydrated(true)
     })()
-  }, [])
+  }, [passkeySupportedNow])
+
+  useEffect(() => {
+    if (authState !== 'locked' || !passkeyEnabled || passkeyAttempted) return
+
+    setPasskeyAttempted(true)
+    void tryPasskeyUnlock()
+  }, [authState, passkeyEnabled, passkeyAttempted, tryPasskeyUnlock])
 
   useEffect(() => {
     if (tasks.length === 0) return
@@ -280,6 +402,10 @@ function App() {
           { key: 'auth.salt', value: encodeSalt(salt) },
           { key: 'auth.hash', value: passwordHash },
         ])
+
+        if (enablePasskeyOnSetup && passkeySupportedNow) {
+          await registerPasskey(password)
+        }
 
         const derivedKey = await deriveAesKey(password, salt)
         setKey(derivedKey)
@@ -652,9 +778,25 @@ function App() {
       <main className="mx-auto flex min-h-screen w-full max-w-xl items-center p-6">
         <section className="w-full rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl shadow-black/30">
           <h1 className="text-2xl font-semibold text-slate-100">RocketTask</h1>
-          <p className="mt-2 text-sm text-slate-400">{authState === 'setup' ? 'Set a local password.' : 'Unlock with your password.'}</p>
+          <p className="mt-2 text-sm text-slate-400">{authState === 'setup' ? 'Set a local password.' : 'Unlock with your password or passkey.'}</p>
+          {authState === 'locked' && passkeyEnabled ? (
+            <button
+              type="button"
+              className="mt-4 w-full rounded-lg border border-emerald-500 px-4 py-2 text-sm font-medium text-emerald-200"
+              onClick={() => void tryPasskeyUnlock()}
+              disabled={passkeyBusy}
+            >
+              {passkeyBusy ? 'Checking Face ID / Touch ID…' : 'Use Face ID / Touch ID'}
+            </button>
+          ) : null}
           <form className="mt-5 space-y-3" onSubmit={handleAuthSubmit}>
             <input className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" />
+            {authState === 'setup' && passkeySupported ? (
+              <label className="flex items-center gap-2 text-xs text-slate-300">
+                <input type="checkbox" checked={enablePasskeyOnSetup} onChange={(event) => setEnablePasskeyOnSetup(event.target.checked)} />
+                Enable PassKey login (Face ID / Touch ID)
+              </label>
+            ) : null}
             {authError ? <p className="text-sm text-rose-400">{authError}</p> : null}
             <button className="w-full rounded-lg bg-cyan-500 px-4 py-2 font-medium text-slate-900" type="submit">{authState === 'setup' ? 'Create password' : 'Unlock'}</button>
           </form>
