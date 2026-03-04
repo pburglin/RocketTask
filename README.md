@@ -1,73 +1,116 @@
-# React + TypeScript + Vite
+# RocketTask 🚀
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+RocketTask is a fast, mobile-first agile task tool focused on one thing: turning daily work into visible momentum.
 
-Currently, two official plugins are available:
+Built with React + TypeScript + Vite, it runs entirely in the browser with no backend database.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Why RocketTask
 
-## React Compiler
+- Capture tasks quickly
+- Track real time spent
+- Filter and sort work instantly
+- Generate practical reports
+- Keep your data local to your device/browser
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Core Features
 
-## Expanding the ESLint configuration
+- **Task management**
+  - Create, edit, delete tasks
+  - Labels, stakeholders, deadlines, checkpoints, next actions
+  - Status flow (`todo`, `in_progress`, `done`)
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- **Timer + corrections**
+  - Start/pause per-task timers
+  - Live active timer display
+  - Manual tracked-time correction during edit
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- **Powerful filtering/sorting**
+  - Search across title, notes, labels, stakeholders, dates, and more
+  - Multi-status and label filters
+  - Sort by updated date, created date, title, status, deadline, checkpoint, next action
+  - Filter/sort state persists in browser storage
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+- **Reports**
+  - Period-based reports: week, month, quarter, year
+  - Time breakdown by task
+  - Opened vs closed trend insights
+  - Email report draft generation via `mailto:`
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+- **Settings + data portability**
+  - Full local backup export to JSON
+  - Full validated import from JSON (schema/shape checks before import)
+
+- **AI rewrite (optional)**
+  - Rewrite task notes from the browser
+  - Supports OpenRouter API key/model settings
+  - Can use free OpenRouter models (for example: `nvidia /nemotron-3-nano-30b-a3b:free`)
+
+- **PWA-friendly UX**
+  - Installable web app metadata + service worker
+  - Footer navigation for quick mobile actions
+
+## Architecture (Simple & Local)
+
+RocketTask intentionally avoids server-side persistence.
+
+- **Frontend only:** React + TypeScript
+- **Build/dev:** Vite
+- **Local data:** IndexedDB via Dexie
+- **Crypto:** WebCrypto (when secure context is available)
+- **No remote database:** all task data remains in the user's browser storage
+
+> Privacy by design: RocketTask does not send your task data to a backend database.
+
+## OpenRouter Integration (Optional)
+
+RocketTask can call AI directly from the browser for rewrite assistance.
+
+- Add your OpenRouter API key in **Settings**
+- Choose a model (including free-tier models)
+- Calls are made from the browser runtime
+
+If you want a no-cost setup, use a free OpenRouter model and token.
+
+## Run Locally
+
+### Requirements
+
+- Node.js 20+
+- npm
+
+### Start
+
+```bash
+git clone git@github.com:pburglin/RocketTask.git
+cd RocketTask
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Then open the local URL printed by Vite (typically `http://localhost:5173`).
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+To expose on LAN for mobile testing:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run dev -- --host 0.0.0.0 --port 5174 --strictPort
 ```
+
+## Build & Quality
+
+```bash
+npm run lint
+npm run test
+npm run build
+```
+
+## PWA Install Notes
+
+- **iPhone Safari:** Share → **Add to Home Screen**
+- **Chrome/Edge (supported contexts):** can show install prompt automatically
+- Install prompt behavior varies by browser + HTTPS/security context
+
+## Project Status
+
+RocketTask is actively evolving with a practical, execution-first philosophy:
+
+> Keep it simple. Keep it fast. Make progress visible.
