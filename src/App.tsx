@@ -1077,46 +1077,89 @@ function escapeHtml(value: string): string {
     .replaceAll('>', '&gt;')
 }
 
+function formatInlineMarkdown(value: string): string {
+  return value
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code class="rounded bg-slate-800 px-1 py-0.5">$1</code>')
+}
+
+function isTableSeparator(line: string): boolean {
+  const clean = line.replace(/\|/g, '').trim()
+  return clean.length > 0 && /^[:\-\s]+$/.test(clean)
+}
+
+function splitTableRow(line: string): string[] {
+  return line
+    .split('|')
+    .map((cell) => cell.trim())
+    .filter((cell, idx, arr) => !(idx === 0 && cell === '') && !(idx === arr.length - 1 && cell === ''))
+}
+
 function markdownToHtml(markdown: string): string {
   const lines = markdown.split('\n')
   const html: string[] = []
   let inList = false
 
-  for (const raw of lines) {
-    const line = escapeHtml(raw.trim())
+  const closeList = () => {
+    if (inList) {
+      html.push('</ul>')
+      inList = false
+    }
+  }
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = escapeHtml(lines[i].trim())
 
     if (!line) {
-      if (inList) {
-        html.push('</ul>')
-        inList = false
+      closeList()
+      continue
+    }
+
+    const nextLine = i + 1 < lines.length ? escapeHtml(lines[i + 1].trim()) : ''
+    if (line.includes('|') && nextLine.includes('|') && isTableSeparator(nextLine)) {
+      closeList()
+      const headerCells = splitTableRow(line)
+      const rows: string[][] = []
+      i += 2
+      while (i < lines.length) {
+        const rowLine = escapeHtml(lines[i].trim())
+        if (!rowLine || !rowLine.includes('|')) {
+          i -= 1
+          break
+        }
+        rows.push(splitTableRow(rowLine))
+        i += 1
       }
+
+      html.push('<div class="mb-3 overflow-x-auto rounded-lg border border-slate-700"><table class="w-full border-collapse text-left text-xs">')
+      html.push('<thead class="bg-slate-800/80"><tr>')
+      headerCells.forEach((cell) => html.push(`<th class="border-b border-slate-700 px-2 py-1 font-semibold">${formatInlineMarkdown(cell)}</th>`))
+      html.push('</tr></thead><tbody>')
+      rows.forEach((row) => {
+        html.push('<tr class="border-b border-slate-800">')
+        row.forEach((cell) => html.push(`<td class="px-2 py-1 align-top">${formatInlineMarkdown(cell)}</td>`))
+        html.push('</tr>')
+      })
+      html.push('</tbody></table></div>')
       continue
     }
 
     if (line.startsWith('### ')) {
-      if (inList) {
-        html.push('</ul>')
-        inList = false
-      }
-      html.push(`<h3 class="mb-1 mt-2 text-sm font-semibold text-cyan-200">${line.slice(4)}</h3>`)
+      closeList()
+      html.push(`<h3 class="mb-1 mt-2 text-sm font-semibold text-cyan-200">${formatInlineMarkdown(line.slice(4))}</h3>`)
       continue
     }
 
     if (line.startsWith('## ')) {
-      if (inList) {
-        html.push('</ul>')
-        inList = false
-      }
-      html.push(`<h2 class="mb-1 mt-2 text-sm font-semibold text-cyan-100">${line.slice(3)}</h2>`)
+      closeList()
+      html.push(`<h2 class="mb-1 mt-2 text-sm font-semibold text-cyan-100">${formatInlineMarkdown(line.slice(3))}</h2>`)
       continue
     }
 
     if (line.startsWith('# ')) {
-      if (inList) {
-        html.push('</ul>')
-        inList = false
-      }
-      html.push(`<h1 class="mb-1 mt-2 text-sm font-semibold text-cyan-50">${line.slice(2)}</h1>`)
+      closeList()
+      html.push(`<h1 class="mb-1 mt-2 text-sm font-semibold text-cyan-50">${formatInlineMarkdown(line.slice(2))}</h1>`)
       continue
     }
 
@@ -1125,25 +1168,16 @@ function markdownToHtml(markdown: string): string {
         html.push('<ul class="mb-2 ml-4 list-disc space-y-1">')
         inList = true
       }
-      html.push(`<li>${line.slice(2)}</li>`)
+      html.push(`<li>${formatInlineMarkdown(line.slice(2))}</li>`)
       continue
     }
 
-    if (inList) {
-      html.push('</ul>')
-      inList = false
-    }
-
-    html.push(`<p class="mb-2 leading-relaxed">${line}</p>`)
+    closeList()
+    html.push(`<p class="mb-2 leading-relaxed">${formatInlineMarkdown(line)}</p>`)
   }
 
-  if (inList) html.push('</ul>')
-
-  return html
-    .join('')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/`([^`]+)`/g, '<code class="rounded bg-slate-800 px-1 py-0.5">$1</code>')
+  closeList()
+  return html.join('')
 }
 
 function formatDurationHms(totalSeconds: number): string {
