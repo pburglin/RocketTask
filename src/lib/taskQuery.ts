@@ -1,6 +1,13 @@
 import type { Task } from './db'
 
-export type TaskSortField = 'updatedAt' | 'createdAt' | 'title' | 'status'
+export type TaskSortField =
+  | 'updatedAt'
+  | 'createdAt'
+  | 'title'
+  | 'status'
+  | 'deadline'
+  | 'nextCheckpoint'
+  | 'nextAction'
 export type SortDirection = 'asc' | 'desc'
 
 export interface TaskQuery {
@@ -38,6 +45,17 @@ export function parseLabelsInput(raw: string): string[] {
   )
 }
 
+export function parseStakeholdersInput(raw: string): string[] {
+  return Array.from(
+    new Set(
+      raw
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean),
+    ),
+  )
+}
+
 export function getTaskSearchBlob(task: Task, context?: TaskFilterContext): string {
   const description = task.id ? context?.descriptionByTaskId?.[task.id] ?? '' : ''
   return [
@@ -45,6 +63,10 @@ export function getTaskSearchBlob(task: Task, context?: TaskFilterContext): stri
     description,
     task.status,
     task.tags.join(' '),
+    (task.stakeholders ?? []).join(' '),
+    task.nextAction ?? '',
+    task.deadline ?? '',
+    task.nextCheckpoint ?? '',
     task.createdAt,
     task.updatedAt,
   ]
@@ -69,12 +91,33 @@ export function taskMatchesQuery(task: Task, query: TaskQuery, context?: TaskFil
   return getTaskSearchBlob(task, context).includes(text)
 }
 
-function compareTaskValues(a: Task, b: Task, field: TaskSortField): number {
-  if (field === 'title' || field === 'status') {
-    return a[field].localeCompare(b[field])
-  }
+function compareString(a: string, b: string): number {
+  return a.localeCompare(b)
+}
 
-  return new Date(a[field]).getTime() - new Date(b[field]).getTime()
+function compareDateMaybe(a?: string, b?: string): number {
+  if (!a && !b) return 0
+  if (!a) return 1
+  if (!b) return -1
+  return new Date(a).getTime() - new Date(b).getTime()
+}
+
+function compareTaskValues(a: Task, b: Task, field: TaskSortField): number {
+  switch (field) {
+    case 'title':
+    case 'status':
+      return compareString(a[field], b[field])
+    case 'deadline':
+      return compareDateMaybe(a.deadline, b.deadline)
+    case 'nextCheckpoint':
+      return compareDateMaybe(a.nextCheckpoint, b.nextCheckpoint)
+    case 'nextAction':
+      return compareString(a.nextAction ?? '', b.nextAction ?? '')
+    case 'createdAt':
+    case 'updatedAt':
+    default:
+      return new Date(a[field]).getTime() - new Date(b[field]).getTime()
+  }
 }
 
 export function filterAndSortTasks(tasks: Task[], query: TaskQuery, context?: TaskFilterContext): Task[] {

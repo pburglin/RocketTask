@@ -8,6 +8,10 @@ export interface Task {
   descriptionCiphertext?: string
   tags: string[]
   status: TaskStatus
+  deadline?: string
+  nextCheckpoint?: string
+  stakeholders?: string[]
+  nextAction?: string
   createdAt: string
   updatedAt: string
 }
@@ -37,6 +41,19 @@ class TaskReporterDatabase extends Dexie {
       tasks: '++id, status, updatedAt, createdAt',
       timeLogs: '++id, taskId, startedAt, endedAt',
       settings: '&key',
+    })
+
+    this.version(2).stores({
+      tasks: '++id, status, updatedAt, createdAt, deadline, nextCheckpoint',
+      timeLogs: '++id, taskId, startedAt, endedAt',
+      settings: '&key',
+    })
+  }
+
+  async ensureTaskDefaults(): Promise<void> {
+    await this.tasks.toCollection().modify((task) => {
+      if (!Array.isArray(task.stakeholders)) task.stakeholders = []
+      if (!Array.isArray(task.tags)) task.tags = []
     })
   }
 }

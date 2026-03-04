@@ -8,7 +8,19 @@ function escapeCsv(value: string): string {
 }
 
 export function tasksToCsv(tasks: Task[], descriptionByTaskId: Record<number, string> = {}): string {
-  const header = ['id', 'title', 'description', 'labels', 'status', 'createdAt', 'updatedAt']
+  const header = [
+    'id',
+    'title',
+    'description',
+    'labels',
+    'status',
+    'deadline',
+    'nextCheckpoint',
+    'stakeholders',
+    'nextAction',
+    'createdAt',
+    'updatedAt',
+  ]
   const rows = tasks.map((task) => {
     const description = task.id ? descriptionByTaskId[task.id] ?? '' : ''
     return [
@@ -17,6 +29,10 @@ export function tasksToCsv(tasks: Task[], descriptionByTaskId: Record<number, st
       description,
       task.tags.join('|'),
       task.status,
+      task.deadline ?? '',
+      task.nextCheckpoint ?? '',
+      (task.stakeholders ?? []).join('|'),
+      task.nextAction ?? '',
       task.createdAt,
       task.updatedAt,
     ]
@@ -82,8 +98,15 @@ export function generateWeeklyReport(
   const lines = tasks.map((task) => {
     const description = task.id ? descriptionByTaskId[task.id] ?? '' : ''
     const labels = task.tags.length > 0 ? ` [${task.tags.join(', ')}]` : ''
+    const scheduling = [
+      task.deadline ? `deadline ${new Date(task.deadline).toLocaleDateString()}` : '',
+      task.nextCheckpoint ? `checkpoint ${new Date(task.nextCheckpoint).toLocaleDateString()}` : '',
+    ]
+      .filter(Boolean)
+      .join(', ')
+    const scheduleSnippet = scheduling ? ` (${scheduling})` : ''
     const descriptionSnippet = description ? ` — ${description}` : ''
-    return `- ${task.title} (${task.status})${labels}${descriptionSnippet}`
+    return `- ${task.title} (${task.status})${labels}${scheduleSnippet}${descriptionSnippet}`
   })
 
   const weekLabel = `${weekStart.toLocaleDateString()} - ${weekEnd.toLocaleDateString()}`
