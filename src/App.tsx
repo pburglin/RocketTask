@@ -628,7 +628,9 @@ function App() {
                 <div>
                   <h2 className="font-medium text-slate-100">{task.title}</h2>
                   <p className="text-xs uppercase tracking-wide text-slate-500">{task.status.replace('_', ' ')} {task.deadline ? `• due ${new Date(task.deadline).toLocaleDateString()}` : ''}</p>
-                  <p className="mt-1 text-xs text-cyan-200">{activeTaskId === task.id ? 'Active timer: ' : 'Tracked: '}{formatDurationHms(task.id ? taskTrackedSeconds[task.id] ?? 0 : 0)}</p>
+                  {((task.id ? taskTrackedSeconds[task.id] ?? 0 : 0) > 0 || activeTaskId === task.id) ? (
+                    <p className="mt-1 text-xs text-cyan-200">{activeTaskId === task.id ? 'Active timer: ' : 'Tracked: '}{formatDurationHms(task.id ? taskTrackedSeconds[task.id] ?? 0 : 0)}</p>
+                  ) : null}
                   {task.tags.length > 0 ? <div className="mt-2 flex flex-wrap gap-2">{task.tags.map((label) => <span key={`${task.id}-${label}`} className="rounded-full border border-slate-600 px-2 py-0.5 text-xs text-slate-300">#{label}</span>)}</div> : null}
                 </div>
                 <div className="flex items-center gap-2">
