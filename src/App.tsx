@@ -14,7 +14,7 @@ import {
   hashPassword,
   randomBytes,
 } from './lib/crypto'
-import { generateWeeklyReport, tasksToCsv } from './lib/reporting'
+import { generateWeeklyReport } from './lib/reporting'
 import { parseJiraText } from './lib/jira'
 import { rewriteTaskText } from './lib/ai'
 import {
@@ -55,9 +55,10 @@ function App() {
   const [queryHydrated, setQueryHydrated] = useState(false)
   const [descriptionByTask, setDescriptionByTask] = useState<Record<number, string>>({})
   const [weeklyReportText, setWeeklyReportText] = useState('')
+  const [reportPeriod, setReportPeriod] = useState<'week' | 'month' | 'quarter' | 'year'>('week')
 
   const [aiApiKey, setAiApiKey] = useState('')
-  const [aiModel, setAiModel] = useState('openai/gpt-4o-mini')
+  const [aiModel, setAiModel] = useState('nvidia /nemotron-3-nano-30b-a3b:free')
   const [aiBusy, setAiBusy] = useState(false)
   const [aiError, setAiError] = useState('')
 
@@ -101,7 +102,7 @@ function App() {
       const savedQuery = await db.settings.get('task.query')
 
       setAiApiKey(savedKey?.value ?? '')
-      setAiModel(savedModel?.value ?? 'openai/gpt-4o-mini')
+      setAiModel(savedModel?.value ?? 'nvidia /nemotron-3-nano-30b-a3b:free')
       setAlertEnabled(alerts?.value !== 'false')
 
       if (savedQuery?.value) {
@@ -224,6 +225,40 @@ function App() {
     return map
   }, [timeLogs, tickNowMs])
 
+  const reportInsights = useMemo(() => {
+    const statusCounts = {
+      todo: filteredTasks.filter((t) => t.status === 'todo').length,
+      in_progress: filteredTasks.filter((t) => t.status === 'in_progress').length,
+      done: filteredTasks.filter((t) => t.status === 'done').length,
+    }
+
+    const topTimeTasks = filteredTasks
+      .map((task) => ({
+        id: task.id ?? 0,
+        title: task.title,
+        seconds: task.id ? taskTrackedSeconds[task.id] ?? 0 : 0,
+      }))
+      .filter((item) => item.seconds > 0)
+      .sort((a, b) => b.seconds - a.seconds)
+      .slice(0, 5)
+
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date()
+      d.setDate(d.getDate() - (6 - i))
+      d.setHours(0, 0, 0, 0)
+      return d
+    })
+
+    const trend = days.map((d) => {
+      const key = d.toISOString().slice(0, 10)
+      const closed = filteredTasks.filter((t) => t.status === 'done' && t.updatedAt.slice(0, 10) === key).length
+      const opened = filteredTasks.filter((t) => t.createdAt.slice(0, 10) === key).length
+      return { key, opened, closed }
+    })
+
+    return { statusCounts, topTimeTasks, trend }
+  }, [filteredTasks, taskTrackedSeconds])
+
   async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setAuthError('')
@@ -321,6 +356,7 @@ function App() {
       }
 
       resetTaskForm()
+      setActivePanel(null)
       return
     }
 
@@ -331,6 +367,7 @@ function App() {
     })
 
     resetTaskForm()
+    setActivePanel(null)
   }
 
   function startEditTask(task: Task) {
@@ -344,6 +381,14 @@ function App() {
     setDeadline(task.deadline ? task.deadline.slice(0, 10) : '')
     setNextCheckpoint(task.nextCheckpoint ? task.nextCheckpoint.slice(0, 10) : '')
     setNextAction(task.nextAction ?? '')
+  }
+
+  async function deleteEditingTask() {
+    if (!editingTaskId) return
+    await db.timeLogs.where('taskId').equals(editingTaskId).delete()
+    await db.tasks.delete(editingTaskId)
+    resetTaskForm()
+    setActivePanel(null)
   }
 
   async function closeAnyRunningLog() {
@@ -456,17 +501,6 @@ function App() {
     setLabelsInput(next.join(', ') + ', ')
   }
 
-  function exportFilteredCsv() {
-    const csv = tasksToCsv(filteredTasks, descriptionByTask)
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `task-report-${new Date().toISOString().slice(0, 10)}.csv`
-    anchor.click()
-    URL.revokeObjectURL(url)
-  }
-
   async function exportAllDataJson() {
     const allTasks = await db.tasks.toArray()
     const allTimeLogs = await db.timeLogs.toArray()
@@ -575,9 +609,32 @@ function App() {
     setDeferredInstallPrompt(null)
   }
 
-  function generateCurrentWeeklyReport() {
-    const report = generateWeeklyReport(filteredTasks, timeLogs, descriptionByTask)
-    setWeeklyReportText(report.text)
+  function generateReport(period: 'week' | 'month' | 'quarter' | 'year') {
+    setReportPeriod(period)
+
+    const now = new Date()
+    const start = new Date(now)
+    if (period === 'week') start.setDate(now.getDate() - 7)
+    if (period === 'month') start.setMonth(now.getMonth() - 1)
+    if (period === 'quarter') start.setMonth(now.getMonth() - 3)
+    if (period === 'year') start.setFullYear(now.getFullYear() - 1)
+
+    const scopedLogs = timeLogs.filter((log) => new Date(log.startedAt) >= start)
+    const report = generateWeeklyReport(filteredTasks, scopedLogs, descriptionByTask, now)
+
+    const header = `Report Period: ${period.toUpperCase()}\nFrom: ${start.toLocaleDateString()} To: ${now.toLocaleDateString()}\n\n`
+    setWeeklyReportText(header + report.text)
+  }
+
+  function emailReport() {
+    if (!weeklyReportText.trim()) {
+      setWeeklyReportText('Generate a report first, then email it.')
+      return
+    }
+
+    const subject = encodeURIComponent(`RocketTask ${reportPeriod} report`)
+    const body = encodeURIComponent(weeklyReportText)
+    window.location.href = `mailto:?subject=${subject}&body=${body}`
   }
 
   async function toggleAlerts(value: boolean) {
@@ -656,7 +713,9 @@ function App() {
               <input className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" placeholder="Task title" value={title} onChange={(event) => setTitle(event.target.value)} />
               <textarea className="h-20 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" placeholder="Encrypted notes" value={description} onChange={(event) => setDescription(event.target.value)} />
               <div className="flex gap-2">
-                <button type="button" onClick={() => void runAiRewrite()} disabled={aiBusy || !description.trim()} className="inline-flex items-center gap-2 rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-100 disabled:opacity-50"><Sparkles size={14} /> {aiBusy ? 'Rewriting…' : 'AI rewrite'}</button>
+                {aiApiKey.trim() ? (
+                  <button type="button" onClick={() => void runAiRewrite()} disabled={aiBusy || !description.trim()} className="inline-flex items-center gap-2 rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-100 disabled:opacity-50"><Sparkles size={14} /> {aiBusy ? 'Rewriting…' : 'AI rewrite'}</button>
+                ) : null}
                 {aiError ? <p className="text-xs text-rose-400">{aiError}</p> : null}
               </div>
               <div className="grid gap-3 md:grid-cols-2">
@@ -667,7 +726,7 @@ function App() {
               </div>
               <input className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" placeholder="Suggested next action" value={nextAction} onChange={(event) => setNextAction(event.target.value)} />
               {editingTaskId ? <label className="space-y-1 text-xs text-slate-300"><span className="block">Tracked time correction (minutes)</span><input className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" type="number" min={0} value={trackedMinutesInput} onChange={(event) => setTrackedMinutesInput(event.target.value)} /></label> : null}
-              <div className="flex gap-2"><button className="rounded-lg bg-cyan-500 px-4 py-2 font-medium text-slate-900" type="submit">{editingTaskId ? 'Save changes' : 'Add task'}</button><button type="button" className="rounded-lg border border-slate-600 px-4 py-2 text-slate-200" onClick={() => { resetTaskForm(); setActivePanel(null) }}>Close</button></div>
+              <div className="flex gap-2"><button className="rounded-lg bg-cyan-500 px-4 py-2 font-medium text-slate-900" type="submit">{editingTaskId ? 'Save changes' : 'Add task'}</button>{editingTaskId ? <button type="button" className="rounded-lg border border-rose-500 px-4 py-2 text-rose-300" onClick={() => void deleteEditingTask()}>Delete</button> : null}<button type="button" className="rounded-lg border border-slate-600 px-4 py-2 text-slate-200" onClick={() => { resetTaskForm(); setActivePanel(null) }}>Close</button></div>
             </form>
           ) : null}
 
@@ -706,10 +765,46 @@ function App() {
             <div className="space-y-3">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Reports</h2>
               <div className="flex flex-wrap gap-2">
-                <button type="button" className="rounded-lg border border-cyan-500 px-3 py-2 text-sm font-medium text-cyan-100" onClick={generateCurrentWeeklyReport}>Generate weekly report</button>
-                <button type="button" className="rounded-lg bg-emerald-500 px-3 py-2 text-sm font-medium text-slate-900" onClick={exportFilteredCsv}>Export visible as CSV</button>
-                <button type="button" className={`rounded-lg border px-3 py-2 text-sm ${alertEnabled ? 'border-rose-500 text-rose-200' : 'border-slate-600 text-slate-300'}`} onClick={() => void toggleAlerts(!alertEnabled)}>{alertEnabled ? 'Alerts on' : 'Alerts off'}</button>
+                <button type="button" className="rounded-lg border border-cyan-500 px-3 py-2 text-xs font-medium text-cyan-100" onClick={() => generateReport('week')}>Week</button>
+                <button type="button" className="rounded-lg border border-cyan-500 px-3 py-2 text-xs font-medium text-cyan-100" onClick={() => generateReport('month')}>Month</button>
+                <button type="button" className="rounded-lg border border-cyan-500 px-3 py-2 text-xs font-medium text-cyan-100" onClick={() => generateReport('quarter')}>Quarter</button>
+                <button type="button" className="rounded-lg border border-cyan-500 px-3 py-2 text-xs font-medium text-cyan-100" onClick={() => generateReport('year')}>Year</button>
+                <button type="button" className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-medium text-slate-900" onClick={emailReport}>Email Report</button>
+                <button type="button" className={`rounded-lg border px-3 py-2 text-xs ${alertEnabled ? 'border-rose-500 text-rose-200' : 'border-slate-600 text-slate-300'}`} onClick={() => void toggleAlerts(!alertEnabled)}>{alertEnabled ? 'Alerts on' : 'Alerts off'}</button>
               </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3">
+                  <p className="mb-2 text-xs uppercase text-slate-400">Status mix</p>
+                  {(['todo', 'in_progress', 'done'] as const).map((s) => {
+                    const total = Math.max(1, filteredTasks.length)
+                    const value = reportInsights.statusCounts[s]
+                    const width = Math.round((value / total) * 100)
+                    return <div key={s} className="mb-2"><div className="mb-1 flex justify-between text-xs text-slate-300"><span>{s.replace('_', ' ')}</span><span>{value}</span></div><div className="h-2 rounded bg-slate-800"><div className="h-2 rounded bg-cyan-500" style={{ width: `${width}%` }} /></div></div>
+                  })}
+                </div>
+                <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3">
+                  <p className="mb-2 text-xs uppercase text-slate-400">Top time tasks</p>
+                  {reportInsights.topTimeTasks.length === 0 ? <p className="text-xs text-slate-500">No tracked time yet.</p> : reportInsights.topTimeTasks.map((t) => {
+                    const max = Math.max(...reportInsights.topTimeTasks.map((x) => x.seconds), 1)
+                    const width = Math.round((t.seconds / max) * 100)
+                    return <div key={t.id} className="mb-2"><div className="mb-1 flex justify-between text-xs text-slate-300"><span className="truncate pr-2">{t.title}</span><span>{formatDurationHms(t.seconds)}</span></div><div className="h-2 rounded bg-slate-800"><div className="h-2 rounded bg-emerald-500" style={{ width: `${width}%` }} /></div></div>
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3">
+                <p className="mb-2 text-xs uppercase text-slate-400">Opened vs Closed (last 7 days)</p>
+                <div className="grid grid-cols-7 gap-1">
+                  {reportInsights.trend.map((d) => {
+                    const max = Math.max(1, ...reportInsights.trend.map((x) => Math.max(x.opened, x.closed)))
+                    const openH = Math.max(2, Math.round((d.opened / max) * 40))
+                    const closedH = Math.max(2, Math.round((d.closed / max) * 40))
+                    return <div key={d.key} className="flex flex-col items-center gap-1"><div className="flex h-12 items-end gap-1"><div className="w-2 rounded bg-amber-500" style={{ height: `${openH}px` }} /><div className="w-2 rounded bg-emerald-500" style={{ height: `${closedH}px` }} /></div><span className="text-[10px] text-slate-500">{d.key.slice(5)}</span></div>
+                  })}
+                </div>
+              </div>
+
               {weeklyReportText ? <textarea readOnly value={weeklyReportText} className="h-48 w-full resize-y rounded-lg border border-slate-700 bg-slate-950/60 p-3 text-sm text-slate-200" /> : null}
             </div>
           ) : null}
