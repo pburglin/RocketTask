@@ -899,7 +899,7 @@ function App() {
     <main className="mx-auto min-h-screen w-full max-w-5xl p-4 pb-36 sm:p-6 sm:pb-40">
       <header className="mb-4">
         <h1 className="flex items-center gap-2 text-2xl font-semibold text-slate-100"><ClipboardList size={24} /> RocketTask</h1>
-        <p className="text-sm text-slate-400">Fast, focused, mobile-friendly task execution.</p>
+        <p className="text-sm text-slate-400">Fast, focused, mobile-friendly task tracking.</p>
         {aiApiKey.trim() ? (
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <button type="button" className="rounded-lg border border-violet-500 px-3 py-1.5 text-xs text-violet-200" onClick={() => void generateAiDailyPlan()} disabled={aiPlanBusy}>
@@ -962,8 +962,8 @@ function App() {
           {activePanel === 'create' ? (
             <form className="space-y-3" onSubmit={submitTask}>
               <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-300">{editingTaskId ? 'Edit Task' : 'Create Task'}</h2>
-              <input className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" placeholder="Task title" value={title} onChange={(event) => setTitle(event.target.value)} />
-              <textarea className="h-20 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" placeholder="Encrypted notes" value={description} onChange={(event) => setDescription(event.target.value)} />
+              <input className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" placeholder="Title" value={title} onChange={(event) => setTitle(event.target.value)} />
+              <textarea className="h-20 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" placeholder="Notes / context" value={description} onChange={(event) => setDescription(event.target.value)} />
               <div className="flex gap-2">
                 {aiApiKey.trim() ? (
                   <button type="button" onClick={() => void runAiRewrite()} disabled={aiBusy || !description.trim()} className="inline-flex items-center gap-2 rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-100 disabled:opacity-50"><Sparkles size={14} /> {aiBusy ? 'Rewriting…' : 'AI rewrite'}</button>
@@ -1072,7 +1072,7 @@ function App() {
               <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-300">About</h2>
               <p><strong>Mission:</strong> Build consistent momentum with a lightweight agile task flow — capture fast, execute clearly, report confidently.</p>
               <p>This is a simple agile task tool focused on speed, clarity, and daily progress.</p>
-              <p>Privacy by design: we do not store your data on servers. All data stays in your browser storage (secure form when WebCrypto context is available).</p>
+              <p>Privacy by design: we do not store your data on servers. All data stays in your browser storage (secure form when WebCrypto context is available). If you set an AI API key and trigger AI assist actions, relevant task data is sent to OpenRouter to fulfill those requests.</p>
               <p>AI tip: you can create a free token at <strong>openrouter.ai</strong> and use a free model for AI assist. Even though RocketTask does not log/store your key, this is often safer than using a paid key.</p>
               {aiApiKey.trim() ? (
                 <p className="rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
