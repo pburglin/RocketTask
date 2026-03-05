@@ -1073,7 +1073,7 @@ function App() {
               <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-300">About</h2>
               <p><strong>Mission:</strong> Build consistent momentum with a lightweight agile task flow — capture fast, execute clearly, report confidently.</p>
               <p>This is a simple agile task tool focused on speed, clarity, and daily progress.</p>
-              <p><strong>Privacy by design:</strong> we do not store your data on servers. All data stays in your browser storage (secure form when WebCrypto context is available). If you set an AI API key and trigger AI assist actions, relevant task data is sent to OpenRouter to fulfill those requests.</p>
+              <p><strong>Privacy by design:</strong> we do not store your data on servers. All data stays in your browser storage (secure form when WebCrypto context is available).</p>
               <p><strong>AI tip:</strong> you can create a free token at <strong>openrouter.ai</strong> and use a free model for AI assist. Even though RocketTask does not log/store your key, this is often safer than using a paid key.</p>
               {aiApiKey.trim() ? (
                 <p className="rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
