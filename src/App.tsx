@@ -413,6 +413,37 @@ function App() {
         }
 
         const derivedKey = await deriveAesKey(password, salt)
+
+        const existingTasks = await db.tasks.count()
+        if (existingTasks === 0) {
+          const now = new Date().toISOString()
+          const demoTasks = [
+            { title: 'Plan today’s top 3 priorities', tags: ['work'], status: 'todo', nextAction: 'Pick the most important deliverable first.' },
+            { title: 'Prepare weekly update for team', tags: ['work'], status: 'in_progress', nextAction: 'Summarize progress, blockers, and next steps.' },
+            { title: 'Pay utility bill', tags: ['personal'], status: 'todo', nextAction: 'Complete payment before due date.' },
+            { title: 'Book family weekend activity', tags: ['personal'], status: 'todo', nextAction: 'Choose one option and confirm schedule.' },
+            { title: 'Refine backlog grooming checklist', tags: ['work'], status: 'done', nextAction: 'Reuse as template for next sprint.' },
+          ] as const
+
+          for (const item of demoTasks) {
+            const descriptionCiphertext = await encryptText(
+              `${item.title} (sample task). You can edit or delete this anytime.`,
+              derivedKey,
+            )
+
+            await db.tasks.add({
+              title: item.title,
+              descriptionCiphertext,
+              tags: [...item.tags],
+              stakeholders: [],
+              status: item.status,
+              nextAction: item.nextAction,
+              createdAt: now,
+              updatedAt: now,
+            })
+          }
+        }
+
         setKey(derivedKey)
         setAuthState('ready')
         setPassword('')
@@ -1043,6 +1074,11 @@ function App() {
               <p>This is a simple agile task tool focused on speed, clarity, and daily progress.</p>
               <p>Privacy by design: we do not store your data on servers. All data stays in your browser storage (secure form when WebCrypto context is available).</p>
               <p>AI tip: you can create a free token at <strong>openrouter.ai</strong> and use a free model for AI assist. Even though RocketTask does not log/store your key, this is often safer than using a paid key.</p>
+              {aiApiKey.trim() ? (
+                <p className="rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
+                  AI data-sharing notice: when you click AI features (like AI rewrite or AI Daily Planner), relevant task content is sent to OpenRouter so it can generate responses.
+                </p>
+              ) : null}
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-100" onClick={() => void installPwa()}>
                   Install RocketTask
