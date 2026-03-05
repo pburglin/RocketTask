@@ -17,6 +17,7 @@ import {
 import { generateWeeklyReport } from './lib/reporting'
 import { parseJiraText } from './lib/jira'
 import { rewriteTaskText } from './lib/ai'
+import { BUILD_LABEL } from './buildInfo'
 import {
   defaultTaskQuery,
   filterAndSortTasks,
@@ -1072,14 +1073,14 @@ function App() {
               <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-300">About</h2>
               <p><strong>Mission:</strong> Build consistent momentum with a lightweight agile task flow — capture fast, execute clearly, report confidently.</p>
               <p>This is a simple agile task tool focused on speed, clarity, and daily progress.</p>
-              <p>Privacy by design: we do not store your data on servers. All data stays in your browser storage (secure form when WebCrypto context is available). If you set an AI API key and trigger AI assist actions, relevant task data is sent to OpenRouter to fulfill those requests.</p>
-              <p>AI tip: you can create a free token at <strong>openrouter.ai</strong> and use a free model for AI assist. Even though RocketTask does not log/store your key, this is often safer than using a paid key.</p>
+              <p><strong>Privacy by design:</strong> we do not store your data on servers. All data stays in your browser storage (secure form when WebCrypto context is available). If you set an AI API key and trigger AI assist actions, relevant task data is sent to OpenRouter to fulfill those requests.</p>
+              <p><strong>AI tip:</strong> you can create a free token at <strong>openrouter.ai</strong> and use a free model for AI assist. Even though RocketTask does not log/store your key, this is often safer than using a paid key.</p>
               {aiApiKey.trim() ? (
                 <p className="rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
                   AI data-sharing notice: when you click AI features (like AI rewrite or AI Daily Planner), relevant task content is sent to OpenRouter so it can generate responses.
                 </p>
               ) : null}
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center justify-center gap-2">
                 <button type="button" className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-100" onClick={() => void installPwa()}>
                   Install RocketTask
                 </button>
@@ -1088,6 +1089,7 @@ function App() {
               {installMessage ? <p className="text-xs text-cyan-200">{installMessage}</p> : null}
               <p>PWA tip (iPhone Safari): tap <strong>Share</strong> → <strong>Add to Home Screen</strong>. Safari usually does not show the install prompt button automatically like Chrome does.</p>
               <p>Vibe-coded from a phone by <strong>Pedro Burglin</strong>.</p>
+              <p className="text-xs text-slate-500">{BUILD_LABEL}</p>
             </div>
           ) : null}
         </section>
