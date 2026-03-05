@@ -8,6 +8,8 @@ export type TaskSortField =
   | 'deadline'
   | 'nextCheckpoint'
   | 'nextAction'
+  | 'loe'
+  | 'priority'
 export type SortDirection = 'asc' | 'desc'
 
 export interface TaskQuery {
@@ -67,6 +69,8 @@ export function getTaskSearchBlob(task: Task, context?: TaskFilterContext): stri
     task.nextAction ?? '',
     task.deadline ?? '',
     task.nextCheckpoint ?? '',
+    String(task.loe ?? ''),
+    String(task.priority ?? ''),
     task.createdAt,
     task.updatedAt,
   ]
@@ -113,6 +117,10 @@ function compareTaskValues(a: Task, b: Task, field: TaskSortField): number {
       return compareDateMaybe(a.nextCheckpoint, b.nextCheckpoint)
     case 'nextAction':
       return compareString(a.nextAction ?? '', b.nextAction ?? '')
+    case 'loe':
+      return (a.loe ?? Number.POSITIVE_INFINITY) - (b.loe ?? Number.POSITIVE_INFINITY)
+    case 'priority':
+      return (a.priority ?? Number.POSITIVE_INFINITY) - (b.priority ?? Number.POSITIVE_INFINITY)
     case 'createdAt':
     case 'updatedAt':
     default:

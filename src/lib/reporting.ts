@@ -18,6 +18,8 @@ export function tasksToCsv(tasks: Task[], descriptionByTaskId: Record<number, st
     'nextCheckpoint',
     'stakeholders',
     'nextAction',
+    'loe',
+    'priority',
     'createdAt',
     'updatedAt',
   ]
@@ -33,6 +35,8 @@ export function tasksToCsv(tasks: Task[], descriptionByTaskId: Record<number, st
       task.nextCheckpoint ?? '',
       (task.stakeholders ?? []).join('|'),
       task.nextAction ?? '',
+      String(task.loe ?? ''),
+      String(task.priority ?? ''),
       task.createdAt,
       task.updatedAt,
     ]
@@ -111,8 +115,15 @@ export function generateWeeklyReport(
       .filter(Boolean)
       .join(', ')
     const scheduleSnippet = scheduling ? ` (${scheduling})` : ''
+    const scoring = [
+      task.priority ? `priority ${task.priority}` : '',
+      task.loe ? `loe ${task.loe}` : '',
+    ]
+      .filter(Boolean)
+      .join(', ')
+    const scoringSnippet = scoring ? ` [${scoring}]` : ''
     const descriptionSnippet = description ? ` — ${description}` : ''
-    return `- ${task.title} (${task.status})${labels}${scheduleSnippet}${descriptionSnippet}`
+    return `- ${task.title} (${task.status})${labels}${scheduleSnippet}${scoringSnippet}${descriptionSnippet}`
   })
 
   const timeBreakdownLines = tasks

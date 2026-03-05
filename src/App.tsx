@@ -84,6 +84,8 @@ function App() {
   const [deadline, setDeadline] = useState('')
   const [nextCheckpoint, setNextCheckpoint] = useState('')
   const [nextAction, setNextAction] = useState('')
+  const [loeInput, setLoeInput] = useState('')
+  const [priorityInput, setPriorityInput] = useState('')
   const [editingTaskId, setEditingTaskId] = useState<number | null>(null)
 
   const [taskQuery, setTaskQuery] = useState<TaskQuery>(defaultTaskQuery)
@@ -419,11 +421,11 @@ function App() {
         if (existingTasks === 0) {
           const now = new Date().toISOString()
           const demoTasks = [
-            { title: 'Plan today’s top 3 priorities', tags: ['work'], status: 'todo', nextAction: 'Pick the most important deliverable first.' },
-            { title: 'Prepare weekly update for team', tags: ['work'], status: 'in_progress', nextAction: 'Summarize progress, blockers, and next steps.' },
-            { title: 'Pay utility bill', tags: ['personal'], status: 'todo', nextAction: 'Complete payment before due date.' },
-            { title: 'Book family weekend activity', tags: ['personal'], status: 'todo', nextAction: 'Choose one option and confirm schedule.' },
-            { title: 'Refine backlog grooming checklist', tags: ['work'], status: 'done', nextAction: 'Reuse as template for next sprint.' },
+            { title: 'Plan today’s top 3 priorities', tags: ['work'], status: 'todo', nextAction: 'Pick the most important deliverable first.', loe: 4, priority: 9 },
+            { title: 'Prepare weekly update for team', tags: ['work'], status: 'in_progress', nextAction: 'Summarize progress, blockers, and next steps.', loe: 6, priority: 8 },
+            { title: 'Pay utility bill', tags: ['personal'], status: 'todo', nextAction: 'Complete payment before due date.', loe: 2, priority: 7 },
+            { title: 'Book family weekend activity', tags: ['personal'], status: 'todo', nextAction: 'Choose one option and confirm schedule.', loe: 3, priority: 5 },
+            { title: 'Refine backlog grooming checklist', tags: ['work'], status: 'done', nextAction: 'Reuse as template for next sprint.', loe: 5, priority: 6 },
           ] as const
 
           for (const item of demoTasks) {
@@ -439,6 +441,8 @@ function App() {
               stakeholders: [],
               status: item.status,
               nextAction: item.nextAction,
+              loe: item.loe,
+              priority: item.priority,
               createdAt: now,
               updatedAt: now,
             })
@@ -481,6 +485,8 @@ function App() {
     setDeadline('')
     setNextCheckpoint('')
     setNextAction('')
+    setLoeInput('')
+    setPriorityInput('')
     setAiError('')
   }
 
@@ -495,6 +501,9 @@ function App() {
         : `plain:${encodeURIComponent(description.trim())}`
       : undefined
 
+    const loe = loeInput ? Math.min(10, Math.max(1, Number(loeInput))) : undefined
+    const priority = priorityInput ? Math.min(10, Math.max(1, Number(priorityInput))) : undefined
+
     const payload = {
       title: title.trim(),
       descriptionCiphertext: cipherText,
@@ -503,6 +512,8 @@ function App() {
       deadline: deadline || undefined,
       nextCheckpoint: nextCheckpoint || undefined,
       nextAction: nextAction.trim() || undefined,
+      loe,
+      priority,
       updatedAt: now,
     }
 
@@ -548,6 +559,8 @@ function App() {
     setDeadline(task.deadline ? task.deadline.slice(0, 10) : '')
     setNextCheckpoint(task.nextCheckpoint ? task.nextCheckpoint.slice(0, 10) : '')
     setNextAction(task.nextAction ?? '')
+    setLoeInput(task.loe ? String(task.loe) : '')
+    setPriorityInput(task.priority ? String(task.priority) : '')
   }
 
   async function deleteEditingTask() {
@@ -919,11 +932,13 @@ function App() {
         ) : null}
       </header>
 
-      <section className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <section className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
         <MetricCard label="Visible" value={String(filteredTasks.length)} />
         <MetricCard label="Todo" value={String(filteredTasks.filter((task) => task.status === 'todo').length)} />
         <MetricCard label="In progress" value={String(filteredTasks.filter((task) => task.status === 'in_progress').length)} />
         <MetricCard label="Done" value={String(filteredTasks.filter((task) => task.status === 'done').length)} />
+        <MetricCard label="Avg priority" value={String(avgScore(filteredTasks, 'priority'))} />
+        <MetricCard label="Avg LOE" value={String(avgScore(filteredTasks, 'loe'))} />
       </section>
 
       <section className="space-y-3">
@@ -934,6 +949,7 @@ function App() {
                 <div>
                   <h2 className="font-medium text-slate-100">{task.title}</h2>
                   <p className="text-xs uppercase tracking-wide text-slate-500">{task.status.replace('_', ' ')} {task.deadline ? `• due ${new Date(task.deadline).toLocaleDateString()}` : ''}</p>
+                  {(task.priority || task.loe) ? <p className="mt-1 text-xs text-violet-200">{task.priority ? `Priority ${task.priority}` : ''}{task.priority && task.loe ? ' • ' : ''}{task.loe ? `LOE ${task.loe}` : ''}</p> : null}
                   {((task.id ? taskTrackedSeconds[task.id] ?? 0 : 0) > 0 || activeTaskId === task.id) ? (
                     <p className="mt-1 text-xs text-cyan-200">{activeTaskId === task.id ? 'Active timer: ' : 'Tracked: '}{formatDurationHms(task.id ? taskTrackedSeconds[task.id] ?? 0 : 0)}</p>
                   ) : null}
@@ -978,6 +994,16 @@ function App() {
                 <label className="min-w-0 space-y-1 overflow-hidden text-xs text-slate-300"><span className="block">Next checkpoint</span><input className="block w-full min-w-0 max-w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100" type="date" value={nextCheckpoint} onChange={(event) => setNextCheckpoint(event.target.value)} /></label>
               </div>
               <input className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" placeholder="Suggested next action" value={nextAction} onChange={(event) => setNextAction(event.target.value)} />
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="space-y-1 text-xs text-slate-300">
+                  <span className="block">Priority (1-10)</span>
+                  <input className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" type="number" min={1} max={10} value={priorityInput} onChange={(event) => setPriorityInput(event.target.value)} placeholder="e.g. 8" />
+                </label>
+                <label className="space-y-1 text-xs text-slate-300">
+                  <span className="block">LOE (1-10)</span>
+                  <input className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" type="number" min={1} max={10} value={loeInput} onChange={(event) => setLoeInput(event.target.value)} placeholder="e.g. 5" />
+                </label>
+              </div>
               {editingTaskId ? <label className="space-y-1 text-xs text-slate-300"><span className="block">Tracked time correction (minutes)</span><input className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" type="number" min={0} value={trackedMinutesInput} onChange={(event) => setTrackedMinutesInput(event.target.value)} /></label> : null}
               <div className="flex items-center justify-between gap-2">
                 <div className="flex gap-2">
@@ -993,8 +1019,8 @@ function App() {
             <div className="space-y-3">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-300">FILTER & SORT</h2>
               <div className="grid gap-3 md:grid-cols-4">
-                <input className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100 md:col-span-2" placeholder="Search title, description, labels, stakeholders, dates, next action" value={taskQuery.searchText} onChange={(event) => setTaskQuery((current) => ({ ...current, searchText: event.target.value }))} />
-                <select className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" value={taskQuery.sortBy} onChange={(event) => setTaskQuery((current) => ({ ...current, sortBy: event.target.value as TaskQuery['sortBy'] }))}><option value="updatedAt">Sort: Updated</option><option value="createdAt">Sort: Created</option><option value="title">Sort: Title</option><option value="status">Sort: Status</option><option value="deadline">Sort: Deadline</option><option value="nextCheckpoint">Sort: Next checkpoint</option><option value="nextAction">Sort: Next action</option></select>
+                <input className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100 md:col-span-2" placeholder="Search title, description, labels, stakeholders, dates, priority, LOE" value={taskQuery.searchText} onChange={(event) => setTaskQuery((current) => ({ ...current, searchText: event.target.value }))} />
+                <select className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" value={taskQuery.sortBy} onChange={(event) => setTaskQuery((current) => ({ ...current, sortBy: event.target.value as TaskQuery['sortBy'] }))}><option value="updatedAt">Sort: Updated</option><option value="createdAt">Sort: Created</option><option value="title">Sort: Title</option><option value="status">Sort: Status</option><option value="priority">Sort: Priority</option><option value="loe">Sort: LOE</option><option value="deadline">Sort: Deadline</option><option value="nextCheckpoint">Sort: Next checkpoint</option><option value="nextAction">Sort: Next action</option></select>
                 <select className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" value={taskQuery.sortDirection} onChange={(event) => setTaskQuery((current) => ({ ...current, sortDirection: event.target.value as TaskQuery['sortDirection'] }))}><option value="desc">Direction: Desc</option><option value="asc">Direction: Asc</option></select>
               </div>
               <div className="flex flex-wrap gap-2">{STATUSES.map((status) => <button key={status} type="button" className={`rounded-full border px-2 py-1 text-xs ${taskQuery.statuses.includes(status) ? 'border-cyan-500 bg-cyan-500/20 text-cyan-200' : 'border-slate-600 text-slate-300'}`} onClick={() => toggleStatusFilter(status)}>{status.replace('_', ' ')}</button>)}</div>
@@ -1216,6 +1242,13 @@ function markdownToHtml(markdown: string): string {
 
   closeList()
   return html.join('')
+}
+
+function avgScore(tasks: Task[], field: 'priority' | 'loe'): string {
+  const values = tasks.map((t) => t[field]).filter((v): v is number => typeof v === 'number' && v > 0)
+  if (values.length === 0) return '-'
+  const avg = values.reduce((sum, v) => sum + v, 0) / values.length
+  return avg.toFixed(1)
 }
 
 function formatDurationHms(totalSeconds: number): string {

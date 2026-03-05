@@ -12,6 +12,8 @@ export interface Task {
   nextCheckpoint?: string
   stakeholders?: string[]
   nextAction?: string
+  loe?: number
+  priority?: number
   createdAt: string
   updatedAt: string
 }
@@ -45,6 +47,12 @@ class TaskReporterDatabase extends Dexie {
 
     this.version(2).stores({
       tasks: '++id, status, updatedAt, createdAt, deadline, nextCheckpoint',
+      timeLogs: '++id, taskId, startedAt, endedAt',
+      settings: '&key',
+    })
+
+    this.version(3).stores({
+      tasks: '++id, status, updatedAt, createdAt, deadline, nextCheckpoint, loe, priority',
       timeLogs: '++id, taskId, startedAt, endedAt',
       settings: '&key',
     })
