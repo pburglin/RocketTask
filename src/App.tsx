@@ -631,13 +631,15 @@ function App() {
 
     try {
       setAiPlanBusy(true)
-      const today = new Date().toISOString().slice(0, 10)
+      const now = new Date()
+      const today = now.toISOString().slice(0, 10)
+      const weekday = now.toLocaleDateString(undefined, { weekday: 'long' })
       const taskLines = filteredTasks.map((task) => {
         const tracked = task.id ? taskTrackedSeconds[task.id] ?? 0 : 0
         return `- ${task.title} | status=${task.status} | deadline=${task.deadline ?? 'none'} | checkpoint=${task.nextCheckpoint ?? 'none'} | tracked=${formatDurationHms(tracked)} | next=${task.nextAction ?? 'none'}`
       })
 
-      const prompt = `You are an execution coach. Build a concise daily plan from these filtered tasks for ${today}. Prioritize approaching/overdue deadlines and checkpoints. Return:\n1) Top 3 priorities\n2) Suggested order with time blocks\n3) Risks/blockers\n4) End-of-day checklist\n\nTasks:\n${taskLines.join('\n') || '- No tasks'}`
+      const prompt = `You are an execution coach. Build a concise daily plan from these filtered tasks for date ${today} (${weekday}). Prioritize approaching/overdue deadlines and checkpoints. Return markdown with clear sections:\n1) Top 3 priorities\n2) Suggested order with time blocks\n3) Risks/blockers\n4) End-of-day checklist\n5) Weekend prep recommendations (actions that reduce next-week risk and improve Monday readiness)\n\nTasks:\n${taskLines.join('\n') || '- No tasks'}`
 
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
