@@ -94,7 +94,9 @@ function App() {
   const [weeklyReportText, setWeeklyReportText] = useState('')
   const [reportPeriod, setReportPeriod] = useState<'week' | 'month' | 'quarter' | 'year'>('week')
   const [aiPlanText, setAiPlanText] = useState('')
+  const [aiPlanDate, setAiPlanDate] = useState('')
   const [aiPlanBusy, setAiPlanBusy] = useState(false)
+  const [showAiPlan, setShowAiPlan] = useState(false)
 
   const [aiApiKey, setAiApiKey] = useState('')
   const [aiModel, setAiModel] = useState('nvidia /nemotron-3-nano-30b-a3b:free')
@@ -219,12 +221,16 @@ function App() {
       const savedModel = await db.settings.get('ai.model')
       const alerts = await db.settings.get('alerts.enabled')
       const savedQuery = await db.settings.get('task.query')
+      const savedPlanText = await db.settings.get('ai.planText')
+      const savedPlanDate = await db.settings.get('ai.planDate')
       const passkeySetting = await db.settings.get('auth.passkeyEnabled')
       const passkeyIdSetting = await db.settings.get('auth.passkeyId')
       const passkeySecretSetting = await db.settings.get('auth.passkeySecret')
 
       setAiApiKey(savedKey?.value ?? '')
       setAiModel(savedModel?.value ?? 'nvidia /nemotron-3-nano-30b-a3b:free')
+      setAiPlanText(savedPlanText?.value ?? '')
+      setAiPlanDate(savedPlanDate?.value ?? '')
       setAlertEnabled(alerts?.value !== 'false')
       setPasskeyEnabled(passkeySetting?.value === 'true' || (!!passkeyIdSetting?.value && !!passkeySecretSetting?.value))
 
@@ -659,11 +665,17 @@ function App() {
 
       if (!response.ok) throw new Error(`AI planner failed (${response.status})`)
       const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> }
-      setAiPlanText(data.choices?.[0]?.message?.content?.trim() || 'No plan returned.')
+      const generatedText = data.choices?.[0]?.message?.content?.trim() || 'No plan returned.'
+      const generationDate = new Date().toLocaleString()
+      setAiPlanText(generatedText)
+      setAiPlanDate(generationDate)
+      setShowAiPlan(true)
 
       await db.settings.bulkPut([
         { key: 'ai.apiKey', value: aiApiKey },
         { key: 'ai.model', value: aiModel },
+        { key: 'ai.planText', value: generatedText },
+        { key: 'ai.planDate', value: generationDate },
       ])
     } catch (error) {
       setAiPlanText(error instanceof Error ? error.message : 'AI planner failed')
@@ -826,6 +838,21 @@ function App() {
     }
   }
 
+  async function clearLocalStorage() {
+    const warning = "All local data including tasks, AI API Key, reports etc will be removed. Once cleared, there is no way to recover the data. Recommend user to export data before going forward."
+    alert(warning)
+    const confirmed = window.confirm("Do you really want to proceed? This will delete EVERYTHING.")
+    if (!confirmed) return
+
+    try {
+      await db.delete()
+      localStorage.clear()
+      window.location.reload()
+    } catch (error) {
+      setSettingsMessage(`Clear failed: ${error instanceof Error ? error.message : 'unknown error'}`)
+    }
+  }
+
   async function installPwa() {
     const promptEvent = deferredInstallPrompt
     if (!promptEvent) {
@@ -918,16 +945,44 @@ function App() {
         <p className="text-sm text-slate-400">Fast, focused, mobile-friendly task tracking.</p>
         {aiApiKey.trim() ? (
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <button type="button" className="rounded-lg border border-violet-500 px-3 py-1.5 text-xs text-violet-200" onClick={() => void generateAiDailyPlan()} disabled={aiPlanBusy}>
+            <button
+              type="button"
+              className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+                showAiPlan ? 'border-violet-400 bg-violet-400/10 text-violet-100' : 'border-violet-500 text-violet-200'
+              }`}
+              onClick={() => {
+                if (!aiPlanText) {
+                  void generateAiDailyPlan()
+                } else {
+                  setShowAiPlan(!showAiPlan)
+                }
+              }}
+              disabled={aiPlanBusy}
+            >
               {aiPlanBusy ? 'Planning…' : 'AI Daily Planner'}
             </button>
+            {aiPlanText && showAiPlan ? (
+              <button
+                type="button"
+                className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+                onClick={() => void generateAiDailyPlan()}
+                disabled={aiPlanBusy}
+              >
+                {aiPlanBusy ? 'Generating…' : 'Generate Fresh Report'}
+              </button>
+            ) : null}
           </div>
         ) : null}
-        {aiPlanText ? (
-          <div
-            className="mt-2 rounded-lg border border-slate-700 bg-slate-900/70 p-3 text-xs text-slate-200"
-            dangerouslySetInnerHTML={{ __html: markdownToHtml(aiPlanText) }}
-          />
+        {aiPlanText && showAiPlan ? (
+          <div className="mt-2 space-y-2">
+            <div
+              className="rounded-lg border border-slate-700 bg-slate-900/70 p-3 text-xs text-slate-200"
+              dangerouslySetInnerHTML={{ __html: markdownToHtml(aiPlanText) }}
+            />
+            {aiPlanDate ? (
+              <p className="px-1 text-[10px] text-slate-500">Generated on: {aiPlanDate}</p>
+            ) : null}
+          </div>
         ) : null}
         {!ENCRYPTION_AVAILABLE ? (
           <p className="mt-2 text-xs text-amber-300">Running in non-secure context (HTTP on LAN). Notes are stored in browser storage in non-WebCrypto mode.</p>
@@ -1056,6 +1111,7 @@ function App() {
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-100" onClick={() => void exportAllDataJson()}>Export all data (JSON)</button>
                 <button type="button" className="rounded-lg border border-indigo-500 px-3 py-2 text-sm text-indigo-100" onClick={() => importFileRef.current?.click()}>Import all data (JSON)</button>
+                <button type="button" className="rounded-lg border border-rose-500 bg-rose-500/10 px-3 py-2 text-sm text-rose-200" onClick={() => void clearLocalStorage()}>Clear all local storage</button>
                 <input ref={importFileRef} type="file" accept="application/json" className="hidden" onChange={onImportAllDataJson} />
               </div>
               {settingsMessage ? <p className="text-sm text-emerald-300">{settingsMessage}</p> : null}
@@ -1130,7 +1186,7 @@ function App() {
               </div>
               {installMessage ? <p className="text-xs text-cyan-200">{installMessage}</p> : null}
               <p>PWA tip (iPhone Safari): tap <strong>Share</strong> → <strong>Add to Home Screen</strong>. Safari usually does not show the install prompt button automatically like Chrome does.</p>
-              <p>Vibe-coded from a phone by <strong>Pedro Burglin</strong>.</p>
+              <p><a href="https://github.com/pburglin/RocketTask" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 transition-colors">Vibe-coded from a phone by Pedro Burglin.</a></p>
               <p className="text-xs text-slate-500">{BUILD_LABEL}</p>
             </div>
           ) : null}
