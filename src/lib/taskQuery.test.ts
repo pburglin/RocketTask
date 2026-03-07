@@ -15,6 +15,7 @@ const tasks: Task[] = [
     id: 2,
     title: 'Design dashboard',
     tags: ['feature'],
+    stakeholders: ['Pedro Burglin', 'QA Team'],
     status: 'in_progress',
     createdAt: '2026-03-01T11:00:00.000Z',
     updatedAt: '2026-03-01T12:00:00.000Z',
@@ -44,6 +45,24 @@ describe('task query engine', () => {
     )
 
     expect(matches).toBe(true)
+  })
+
+  it('matches stakeholder names from search input', () => {
+    const result = filterAndSortTasks(tasks, {
+      ...baseQuery,
+      searchText: 'Pedro',
+    })
+
+    expect(result.map((task) => task.id)).toEqual([2])
+  })
+
+  it('matches normalized terms even with punctuation', () => {
+    const result = filterAndSortTasks(tasks, {
+      ...baseQuery,
+      searchText: 'Pedro, dashboard',
+    })
+
+    expect(result.map((task) => task.id)).toEqual([2])
   })
 
   it('filters by status + labels and sorts by title asc', () => {

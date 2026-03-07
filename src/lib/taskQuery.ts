@@ -58,24 +58,38 @@ export function parseStakeholdersInput(raw: string): string[] {
   )
 }
 
+function normalizeSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeStakeholders(stakeholders: Task['stakeholders']): string {
+  if (!stakeholders) return ''
+  if (Array.isArray(stakeholders)) return stakeholders.join(' ')
+  return String(stakeholders)
+}
+
 export function getTaskSearchBlob(task: Task, context?: TaskFilterContext): string {
   const description = task.id ? context?.descriptionByTaskId?.[task.id] ?? '' : ''
-  return [
-    task.title,
-    description,
-    task.status,
-    task.tags.join(' '),
-    (task.stakeholders ?? []).join(' '),
-    task.nextAction ?? '',
-    task.deadline ?? '',
-    task.nextCheckpoint ?? '',
-    String(task.loe ?? ''),
-    String(task.priority ?? ''),
-    task.createdAt,
-    task.updatedAt,
-  ]
-    .join(' ')
-    .toLowerCase()
+  return normalizeSearchText(
+    [
+      task.title,
+      description,
+      task.status,
+      task.tags.join(' '),
+      normalizeStakeholders(task.stakeholders),
+      task.nextAction ?? '',
+      task.deadline ?? '',
+      task.nextCheckpoint ?? '',
+      String(task.loe ?? ''),
+      String(task.priority ?? ''),
+      task.createdAt,
+      task.updatedAt,
+    ].join(' '),
+  )
 }
 
 export function taskMatchesQuery(task: Task, query: TaskQuery, context?: TaskFilterContext): boolean {
@@ -89,10 +103,13 @@ export function taskMatchesQuery(task: Task, query: TaskQuery, context?: TaskFil
     if (missingLabel) return false
   }
 
-  const text = query.searchText.trim().toLowerCase()
-  if (!text) return true
+  const normalizedSearch = normalizeSearchText(query.searchText)
+  if (!normalizedSearch) return true
 
-  return getTaskSearchBlob(task, context).includes(text)
+  const haystack = getTaskSearchBlob(task, context)
+  const terms = normalizedSearch.split(' ')
+
+  return terms.every((term) => haystack.includes(term))
 }
 
 function compareString(a: string, b: string): number {
