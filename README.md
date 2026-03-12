@@ -4,6 +4,20 @@ RocketTask is a fast, mobile-first agile task tool focused on one thing: turning
 
 Built with React + TypeScript + Vite, it runs entirely in the browser with no backend database.
 
+## Screenshots
+
+### Tasks View
+
+![RocketTask Tasks View](docs/tasks.png)
+
+### Reports View
+
+![RocketTask Reports View](docs/reports.png)
+
+### Login View
+
+![RocketTask Login View](docs/login.png)
+
 ## Why RocketTask
 
 - Capture tasks quickly
