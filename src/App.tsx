@@ -50,7 +50,7 @@ type AiTaskDraft = {
   selected: boolean
 }
 
-const DEFAULT_AI_MODEL = 'openai/gpt-4o-mini'
+const DEFAULT_AI_MODEL = 'nvidia/nemotron-3-nano-30b-a3b:free'
 const STATUSES: TaskStatus[] = ['todo', 'in_progress', 'done']
 const ENCRYPTION_AVAILABLE =
   typeof window !== 'undefined' && typeof window.crypto !== 'undefined' && !!window.crypto.subtle && window.isSecureContext
@@ -908,6 +908,8 @@ function App() {
 
     setAiTaskMessage(`Imported ${selected.length} task(s).`)
     setAiTaskDrafts((current) => current.filter((task) => !task.selected))
+    setShowAiTaskGenerator(false)
+    setActivePanel(null)
   }
 
   async function importJiraTasks() {
@@ -1434,8 +1436,8 @@ function App() {
       ) : null}
 
       {showAiTaskGenerator ? (
-        <section className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
-          <div className="w-full max-w-2xl space-y-4 rounded-2xl border border-slate-700 bg-slate-900 p-4 shadow-2xl">
+        <section className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4">
+          <div className="flex max-h-[85vh] w-full max-w-2xl flex-col space-y-4 overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 p-4 shadow-2xl">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-200">AI Task Generator</h2>
@@ -1482,7 +1484,7 @@ function App() {
               {aiTaskMessage ? <p className="text-xs text-emerald-300">{aiTaskMessage}</p> : null}
             </div>
             {aiTaskDrafts.length > 0 ? (
-              <div className="space-y-3">
+              <div className="min-h-0 flex-1 space-y-3 overflow-hidden">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Review & Import</p>
                   <div className="flex flex-wrap items-center gap-2">
@@ -1498,7 +1500,7 @@ function App() {
                     </button>
                   </div>
                 </div>
-                <div className="space-y-2">
+                <div className="max-h-[42vh] space-y-2 overflow-y-auto pr-1">
                   {aiTaskDrafts.map((task) => (
                     <div key={task.id} className="flex gap-3 rounded-lg border border-slate-700 bg-slate-950/70 p-3">
                       <input
