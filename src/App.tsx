@@ -37,6 +37,19 @@ type AuthenticatorCredential = Credential & {
   rawId: ArrayBuffer
 }
 
+type AiTaskDraft = {
+  id: string
+  title: string
+  description?: string
+  tags: string[]
+  deadline?: string
+  nextCheckpoint?: string
+  nextAction?: string
+  loe?: number
+  priority?: number
+  selected: boolean
+}
+
 const STATUSES: TaskStatus[] = ['todo', 'in_progress', 'done']
 const ENCRYPTION_AVAILABLE =
   typeof window !== 'undefined' && typeof window.crypto !== 'undefined' && !!window.crypto.subtle && window.isSecureContext
@@ -97,6 +110,12 @@ function App() {
   const [aiPlanDate, setAiPlanDate] = useState('')
   const [aiPlanBusy, setAiPlanBusy] = useState(false)
   const [showAiPlan, setShowAiPlan] = useState(false)
+  const [showAiTaskGenerator, setShowAiTaskGenerator] = useState(false)
+  const [aiTaskPrompt, setAiTaskPrompt] = useState('')
+  const [aiTaskDrafts, setAiTaskDrafts] = useState<AiTaskDraft[]>([])
+  const [aiTaskBusy, setAiTaskBusy] = useState(false)
+  const [aiTaskError, setAiTaskError] = useState('')
+  const [aiTaskMessage, setAiTaskMessage] = useState('')
 
   const [aiApiKey, setAiApiKey] = useState('')
   const [aiModel, setAiModel] = useState('nvidia /nemotron-3-nano-30b-a3b:free')
@@ -126,6 +145,7 @@ function App() {
     () => Array.from(new Set(tasks.flatMap((task) => task.tags.map(normalizeLabel)))).sort(),
     [tasks],
   )
+  const selectedAiTaskCount = aiTaskDrafts.filter((task) => task.selected).length
 
   const passkeySupportedNow = typeof window !== 'undefined' && !!window.PublicKeyCredential && !!navigator.credentials
 
@@ -612,6 +632,97 @@ function App() {
     await db.tasks.update(task.id, { status: 'done', updatedAt: new Date().toISOString() })
   }
 
+  function makeAiDraftId(): string {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+      return crypto.randomUUID()
+    }
+    return `${Date.now()}-${Math.round(Math.random() * 1_000_000)}`
+  }
+
+  function normalizeAiTags(input: unknown): string[] {
+    const raw = Array.isArray(input)
+      ? input
+      : typeof input === 'string'
+        ? input.split(',')
+        : []
+    const normalized = raw
+      .map((tag) => normalizeLabel(String(tag)))
+      .filter(Boolean)
+    return Array.from(new Set(normalized))
+  }
+
+  function normalizeAiDate(input: unknown): string | undefined {
+    if (typeof input !== 'string') return undefined
+    const trimmed = input.trim()
+    if (!trimmed) return undefined
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+      return trimmed.slice(0, 10)
+    }
+    return undefined
+  }
+
+  function clampAiScore(input: unknown): number | undefined {
+    const value = typeof input === 'number' ? input : Number(input)
+    if (!Number.isFinite(value)) return undefined
+    return Math.min(10, Math.max(1, Math.round(value)))
+  }
+
+  function extractAiJson(text: string): unknown {
+    const trimmed = text.trim()
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
+    if (fencedMatch?.[1]) {
+      return JSON.parse(fencedMatch[1].trim())
+    }
+
+    const firstBrace = trimmed.indexOf('{')
+    const firstBracket = trimmed.indexOf('[')
+    const start = firstBrace === -1 ? firstBracket : firstBracket === -1 ? firstBrace : Math.min(firstBrace, firstBracket)
+    if (start === -1) {
+      return JSON.parse(trimmed)
+    }
+    const slice = trimmed.slice(start)
+    return JSON.parse(slice)
+  }
+
+  function parseAiTaskDrafts(text: string): Array<Omit<AiTaskDraft, 'id' | 'selected'>> {
+    const parsed = extractAiJson(text) as {
+      tasks?: Array<Record<string, unknown>>
+    } | Array<Record<string, unknown>>
+    const items = Array.isArray(parsed) ? parsed : parsed?.tasks ?? []
+    const drafts: Array<Omit<AiTaskDraft, 'id' | 'selected'>> = []
+
+    for (const item of items) {
+      const title = typeof item.title === 'string' ? item.title.trim() : ''
+      if (!title) continue
+
+      const description = typeof item.description === 'string' ? item.description.trim() : ''
+      const tags = normalizeAiTags(item.tags ?? item.labels)
+      const deadline = normalizeAiDate(item.deadline ?? item.dueDate)
+      const checkpointInput = item.nextCheckpoint ?? item.checkpoint ?? (Array.isArray(item.checkpoints) ? item.checkpoints[0] : undefined)
+      const nextCheckpoint = normalizeAiDate(checkpointInput)
+      const nextAction = typeof item.nextAction === 'string'
+        ? item.nextAction.trim()
+        : typeof item.next_step === 'string'
+          ? item.next_step.trim()
+          : ''
+      const loe = clampAiScore(item.loe)
+      const priority = clampAiScore(item.priority)
+
+      drafts.push({
+        title,
+        description: description || undefined,
+        tags,
+        deadline,
+        nextCheckpoint,
+        nextAction: nextAction || undefined,
+        loe,
+        priority,
+      })
+    }
+
+    return drafts
+  }
+
   async function runAiRewrite() {
     setAiBusy(true)
     setAiError('')
@@ -682,6 +793,109 @@ function App() {
     } finally {
       setAiPlanBusy(false)
     }
+  }
+
+  async function generateAiTasksFromPrompt() {
+    if (!aiApiKey.trim()) return
+    const requestText = aiTaskPrompt.trim()
+    if (!requestText) return
+
+    setAiTaskBusy(true)
+    setAiTaskError('')
+    setAiTaskMessage('')
+    try {
+      const prompt = `You are a task generator for RocketTask. Based on the user request, return ONLY valid JSON with the schema:\n{\n  "tasks": [\n    {\n      "title": "string",\n      "description": "string (optional)",\n      "tags": ["string", "string"],\n      "deadline": "YYYY-MM-DD or null",\n      "nextCheckpoint": "YYYY-MM-DD or null",\n      "nextAction": "string (optional)",\n      "priority": 1-10 or null,\n      "loe": 1-10 or null\n    }\n  ]\n}\nRules: Always include at least 3 tasks. Tags should be short and relevant. If a date is unknown, use null. Do not include markdown or extra text.\n\nUser request:\n${requestText}`
+
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${aiApiKey}`,
+        },
+        body: JSON.stringify({
+          model: aiModel || 'nvidia /nemotron-3-nano-30b-a3b:free',
+          messages: [
+            { role: 'system', content: 'You generate structured task lists for productivity apps.' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.2,
+        }),
+      })
+
+      if (!response.ok) throw new Error(`AI task generator failed (${response.status})`)
+      const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> }
+      const generatedText = data.choices?.[0]?.message?.content?.trim()
+      if (!generatedText) throw new Error('AI task generator returned an empty response.')
+
+      const drafts = parseAiTaskDrafts(generatedText)
+      if (drafts.length === 0) throw new Error('No tasks found in AI response.')
+
+      setAiTaskDrafts(drafts.map((task) => ({ ...task, id: makeAiDraftId(), selected: true })))
+
+      await db.settings.bulkPut([
+        { key: 'ai.apiKey', value: aiApiKey },
+        { key: 'ai.model', value: aiModel },
+      ])
+    } catch (error) {
+      setAiTaskError(error instanceof Error ? error.message : 'AI task generator failed')
+    } finally {
+      setAiTaskBusy(false)
+    }
+  }
+
+  function toggleAiTaskSelection(id: string, checked: boolean) {
+    setAiTaskDrafts((current) => current.map((task) => (task.id === id ? { ...task, selected: checked } : task)))
+  }
+
+  function removeAiTaskDraft(id: string) {
+    setAiTaskDrafts((current) => current.filter((task) => task.id !== id))
+  }
+
+  function selectAllAiTaskDrafts() {
+    setAiTaskDrafts((current) => current.map((task) => ({ ...task, selected: true })))
+  }
+
+  function clearAiTaskSelection() {
+    setAiTaskDrafts((current) => current.map((task) => ({ ...task, selected: false })))
+  }
+
+  function resetAiTaskGenerator() {
+    setAiTaskPrompt('')
+    setAiTaskDrafts([])
+    setAiTaskError('')
+    setAiTaskMessage('')
+  }
+
+  async function importAiTasks() {
+    const selected = aiTaskDrafts.filter((task) => task.selected)
+    if (selected.length === 0) return
+
+    const now = new Date().toISOString()
+    for (const task of selected) {
+      const encrypted = task.description
+        ? key
+          ? await encryptText(task.description, key)
+          : `plain:${encodeURIComponent(task.description)}`
+        : undefined
+
+      await db.tasks.add({
+        title: task.title,
+        descriptionCiphertext: encrypted,
+        tags: task.tags,
+        stakeholders: [],
+        status: 'todo',
+        deadline: task.deadline,
+        nextCheckpoint: task.nextCheckpoint,
+        nextAction: task.nextAction,
+        loe: task.loe,
+        priority: task.priority,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+
+    setAiTaskMessage(`Imported ${selected.length} task(s).`)
+    setAiTaskDrafts((current) => current.filter((task) => !task.selected))
   }
 
   async function importJiraTasks() {
@@ -961,6 +1175,20 @@ function App() {
             >
               {aiPlanBusy ? 'Planning…' : 'AI Daily Planner'}
             </button>
+            <button
+              type="button"
+              className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+                showAiTaskGenerator ? 'border-cyan-400 bg-cyan-400/10 text-cyan-100' : 'border-cyan-500 text-cyan-200'
+              }`}
+              onClick={() => {
+                setShowAiTaskGenerator(true)
+                setAiTaskError('')
+                setAiTaskMessage('')
+              }}
+              disabled={aiTaskBusy}
+            >
+              {aiTaskBusy ? 'Generating…' : 'AI Task Generator'}
+            </button>
             {aiPlanText && showAiPlan ? (
               <button
                 type="button"
@@ -1175,7 +1403,7 @@ function App() {
               <p><strong>AI tip:</strong> you can create a free token at <strong>openrouter.ai</strong> and use a free model for AI assist. Even though RocketTask does not log/store your key, this is often safer than using a paid key.</p>
               {aiApiKey.trim() ? (
                 <p className="rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
-                  AI data-sharing notice: when you click AI features (like AI rewrite or AI Daily Planner), relevant task content is sent to OpenRouter so it can generate responses.
+                  AI data-sharing notice: when you click AI features (like AI rewrite, AI Daily Planner, or AI Task Generator), relevant task content is sent to OpenRouter so it can generate responses.
                 </p>
               ) : null}
               <div className="flex flex-wrap items-center justify-center gap-2">
@@ -1190,6 +1418,106 @@ function App() {
               <p className="text-xs text-slate-500">{BUILD_LABEL}</p>
             </div>
           ) : null}
+        </section>
+      ) : null}
+
+      {showAiTaskGenerator ? (
+        <section className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
+          <div className="w-full max-w-2xl space-y-4 rounded-2xl border border-slate-700 bg-slate-900 p-4 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-200">AI Task Generator</h2>
+                <p className="text-xs text-slate-400">Describe the tasks you want generated in bulk.</p>
+              </div>
+              <button
+                type="button"
+                className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200"
+                onClick={() => setShowAiTaskGenerator(false)}
+              >
+                Close
+              </button>
+            </div>
+            <label className="space-y-1 text-xs text-slate-300">
+              <span className="block">Task request</span>
+              <textarea
+                className="h-28 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100"
+                placeholder="Example: Generate onboarding tasks for a new React engineer, include tags like onboarding and checkpoints for week 1."
+                value={aiTaskPrompt}
+                onChange={(event) => setAiTaskPrompt(event.target.value)}
+              />
+              <span className="block text-[11px] text-slate-400">
+                Example helper: "Plan Q2 launch prep: create release checklist tasks with tags (release, qa) and checkpoints."
+              </span>
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-medium text-slate-900 disabled:opacity-60"
+                onClick={() => void generateAiTasksFromPrompt()}
+                disabled={aiTaskBusy || !aiTaskPrompt.trim()}
+              >
+                {aiTaskBusy ? 'Generating…' : 'Generate Tasks'}
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200"
+                onClick={resetAiTaskGenerator}
+                disabled={aiTaskBusy}
+              >
+                Reset
+              </button>
+              {aiTaskError ? <p className="text-xs text-rose-400">{aiTaskError}</p> : null}
+              {aiTaskMessage ? <p className="text-xs text-emerald-300">{aiTaskMessage}</p> : null}
+            </div>
+            {aiTaskDrafts.length > 0 ? (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Review & Import</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button type="button" className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200" onClick={selectAllAiTaskDrafts}>Select all</button>
+                    <button type="button" className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200" onClick={clearAiTaskSelection}>Clear</button>
+                    <button
+                      type="button"
+                      className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-medium text-slate-900 disabled:opacity-60"
+                      onClick={() => void importAiTasks()}
+                      disabled={selectedAiTaskCount === 0 || aiTaskBusy}
+                    >
+                      Import Selected ({selectedAiTaskCount})
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {aiTaskDrafts.map((task) => (
+                    <div key={task.id} className="flex gap-3 rounded-lg border border-slate-700 bg-slate-950/70 p-3">
+                      <input
+                        type="checkbox"
+                        checked={task.selected}
+                        onChange={(event) => toggleAiTaskSelection(task.id, event.target.checked)}
+                        className="mt-1"
+                      />
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <p className="text-sm font-medium text-slate-100">{task.title}</p>
+                        {task.description ? <p className="text-xs text-slate-300">{task.description}</p> : null}
+                        <div className="flex flex-wrap gap-2 text-[11px] text-slate-400">
+                          {task.tags.length > 0 ? <span>Tags: {task.tags.map((tag) => `#${tag}`).join(' ')}</span> : null}
+                          {task.deadline ? <span>Deadline: {new Date(task.deadline).toLocaleDateString()}</span> : null}
+                          {task.nextCheckpoint ? <span>Checkpoint: {new Date(task.nextCheckpoint).toLocaleDateString()}</span> : null}
+                          {task.nextAction ? <span>Next: {task.nextAction}</span> : null}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="rounded-lg border border-rose-500 px-2 py-1 text-xs text-rose-200"
+                        onClick={() => removeAiTaskDraft(task.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
         </section>
       ) : null}
 
