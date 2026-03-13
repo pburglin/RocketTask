@@ -50,6 +50,7 @@ type AiTaskDraft = {
   selected: boolean
 }
 
+const DEFAULT_AI_MODEL = 'openai/gpt-4o-mini'
 const STATUSES: TaskStatus[] = ['todo', 'in_progress', 'done']
 const ENCRYPTION_AVAILABLE =
   typeof window !== 'undefined' && typeof window.crypto !== 'undefined' && !!window.crypto.subtle && window.isSecureContext
@@ -68,6 +69,11 @@ function fromBase64Url(value: string): Uint8Array {
 
 function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+}
+
+function sanitizeAiModel(value: string | undefined): string {
+  const cleaned = (value ?? '').trim().replace(/\s*\/\s*/g, '/')
+  return cleaned || DEFAULT_AI_MODEL
 }
 
 function encodeTextBase64(value: string): string {
@@ -118,7 +124,7 @@ function App() {
   const [aiTaskMessage, setAiTaskMessage] = useState('')
 
   const [aiApiKey, setAiApiKey] = useState('')
-  const [aiModel, setAiModel] = useState('nvidia /nemotron-3-nano-30b-a3b:free')
+  const [aiModel, setAiModel] = useState(DEFAULT_AI_MODEL)
   const [aiBusy, setAiBusy] = useState(false)
   const [aiError, setAiError] = useState('')
 
@@ -248,7 +254,7 @@ function App() {
       const passkeySecretSetting = await db.settings.get('auth.passkeySecret')
 
       setAiApiKey(savedKey?.value ?? '')
-      setAiModel(savedModel?.value ?? 'nvidia /nemotron-3-nano-30b-a3b:free')
+      setAiModel(sanitizeAiModel(savedModel?.value))
       setAiPlanText(savedPlanText?.value ?? '')
       setAiPlanDate(savedPlanDate?.value ?? '')
       setAlertEnabled(alerts?.value !== 'false')
@@ -729,12 +735,12 @@ function App() {
     try {
       const rewritten = await rewriteTaskText(description, {
         apiKey: aiApiKey || undefined,
-        model: aiModel,
+        model: sanitizeAiModel(aiModel),
       })
       setDescription(rewritten)
       await db.settings.bulkPut([
         { key: 'ai.apiKey', value: aiApiKey },
-        { key: 'ai.model', value: aiModel },
+        { key: 'ai.model', value: sanitizeAiModel(aiModel) },
       ])
     } catch (error) {
       setAiError(error instanceof Error ? error.message : 'AI rewrite failed')
@@ -765,7 +771,7 @@ function App() {
           Authorization: `Bearer ${aiApiKey}`,
         },
         body: JSON.stringify({
-          model: aiModel || 'nvidia /nemotron-3-nano-30b-a3b:free',
+          model: sanitizeAiModel(aiModel),
           messages: [
             { role: 'system', content: 'You produce practical daily execution plans for engineering task management.' },
             { role: 'user', content: prompt },
@@ -774,7 +780,10 @@ function App() {
         }),
       })
 
-      if (!response.ok) throw new Error(`AI planner failed (${response.status})`)
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`AI planner failed (${response.status})${errorText ? `: ${errorText.slice(0, 180)}` : ''}`)
+      }
       const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> }
       const generatedText = data.choices?.[0]?.message?.content?.trim() || 'No plan returned.'
       const generationDate = new Date().toLocaleString()
@@ -784,7 +793,7 @@ function App() {
 
       await db.settings.bulkPut([
         { key: 'ai.apiKey', value: aiApiKey },
-        { key: 'ai.model', value: aiModel },
+        { key: 'ai.model', value: sanitizeAiModel(aiModel) },
         { key: 'ai.planText', value: generatedText },
         { key: 'ai.planDate', value: generationDate },
       ])
@@ -813,7 +822,7 @@ function App() {
           Authorization: `Bearer ${aiApiKey}`,
         },
         body: JSON.stringify({
-          model: aiModel || 'nvidia /nemotron-3-nano-30b-a3b:free',
+          model: sanitizeAiModel(aiModel),
           messages: [
             { role: 'system', content: 'You generate structured task lists for productivity apps.' },
             { role: 'user', content: prompt },
@@ -822,7 +831,10 @@ function App() {
         }),
       })
 
-      if (!response.ok) throw new Error(`AI task generator failed (${response.status})`)
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`AI task generator failed (${response.status})${errorText ? `: ${errorText.slice(0, 180)}` : ''}`)
+      }
       const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> }
       const generatedText = data.choices?.[0]?.message?.content?.trim()
       if (!generatedText) throw new Error('AI task generator returned an empty response.')
@@ -834,7 +846,7 @@ function App() {
 
       await db.settings.bulkPut([
         { key: 'ai.apiKey', value: aiApiKey },
-        { key: 'ai.model', value: aiModel },
+        { key: 'ai.model', value: sanitizeAiModel(aiModel) },
       ])
     } catch (error) {
       setAiTaskError(error instanceof Error ? error.message : 'AI task generator failed')
