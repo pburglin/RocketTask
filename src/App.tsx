@@ -54,6 +54,7 @@ const DEFAULT_AI_MODEL = 'nvidia/nemotron-3-nano-30b-a3b:free'
 const STATUSES: TaskStatus[] = ['todo', 'in_progress', 'done']
 const ENCRYPTION_AVAILABLE =
   typeof window !== 'undefined' && typeof window.crypto !== 'undefined' && !!window.crypto.subtle && window.isSecureContext
+const NOTIFICATION_CHECK_INTERVAL_MS = 60_000
 
 function toBase64Url(bytes: Uint8Array): string {
   const bin = String.fromCharCode(...bytes)
@@ -74,6 +75,35 @@ function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 function sanitizeAiModel(value: string | undefined): string {
   const cleaned = (value ?? '').trim().replace(/\s*\/\s*/g, '/')
   return cleaned || DEFAULT_AI_MODEL
+}
+
+function isNotificationSupported(): boolean {
+  return typeof window !== 'undefined' && 'Notification' in window
+}
+
+function startOfToday(): Date {
+  const now = new Date()
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate())
+}
+
+function daysUntil(dateText: string): number {
+  const target = new Date(`${dateText}T00:00:00`)
+  const today = startOfToday()
+  return Math.round((target.getTime() - today.getTime()) / 86_400_000)
+}
+
+function encodeNotificationKeys(keys: string[]): string {
+  return JSON.stringify(Array.from(new Set(keys)).slice(-500))
+}
+
+function decodeNotificationKeys(value: string | undefined): Set<string> {
+  if (!value) return new Set<string>()
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [])
+  } catch {
+    return new Set<string>()
+  }
 }
 
 function encodeTextBase64(value: string): string {
@@ -137,6 +167,9 @@ function App() {
   const [installMessage, setInstallMessage] = useState('')
 
   const [alertEnabled, setAlertEnabled] = useState(true)
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false)
+  const [notificationPermission, setNotificationPermission] = useState<'default' | 'denied' | 'granted' | 'unsupported'>(() => isNotificationSupported() ? Notification.permission : 'unsupported')
+  const [notificationMessage, setNotificationMessage] = useState('')
   const [activePanel, setActivePanel] = useState<'create' | 'filter' | 'settings' | 'reports' | 'about' | null>(null)
   const [trackedMinutesInput, setTrackedMinutesInput] = useState('0')
   const [tickNowMs, setTickNowMs] = useState(Date.now())
@@ -246,6 +279,7 @@ function App() {
       const savedKey = await db.settings.get('ai.apiKey')
       const savedModel = await db.settings.get('ai.model')
       const alerts = await db.settings.get('alerts.enabled')
+      const notifications = await db.settings.get('notifications.enabled')
       const savedQuery = await db.settings.get('task.query')
       const savedPlanText = await db.settings.get('ai.planText')
       const savedPlanDate = await db.settings.get('ai.planDate')
@@ -258,6 +292,8 @@ function App() {
       setAiPlanText(savedPlanText?.value ?? '')
       setAiPlanDate(savedPlanDate?.value ?? '')
       setAlertEnabled(alerts?.value !== 'false')
+      setNotificationsEnabled(notifications?.value === 'true')
+      setNotificationPermission(isNotificationSupported() ? Notification.permission : 'unsupported')
       setPasskeyEnabled(passkeySetting?.value === 'true' || (!!passkeyIdSetting?.value && !!passkeySecretSetting?.value))
 
       if (savedQuery?.value) {
@@ -337,6 +373,77 @@ function App() {
       // Ignore audio errors in unsupported environments.
     }
   }, [alertEnabled, tasks])
+
+  useEffect(() => {
+    if (!notificationsEnabled || !isNotificationSupported() || notificationPermission !== 'granted') return
+
+    let cancelled = false
+
+    const checkTaskNotifications = async () => {
+      const setting = await db.settings.get('notifications.sent')
+      const sentKeys = decodeNotificationKeys(setting?.value)
+      const nextSentKeys = new Set(sentKeys)
+
+      for (const task of tasks) {
+        if (task.status === 'done' || !task.id) continue
+
+        const candidates = [
+          task.deadline
+            ? {
+                type: 'deadline',
+                date: task.deadline,
+                title: `Deadline ${daysUntil(task.deadline) < 0 ? 'missed' : daysUntil(task.deadline) === 0 ? 'today' : 'tomorrow'}: ${task.title}`,
+                body:
+                  daysUntil(task.deadline) < 0
+                    ? `This task is overdue. Due date was ${new Date(`${task.deadline}T00:00:00`).toLocaleDateString()}.`
+                    : daysUntil(task.deadline) === 0
+                      ? 'This task is due today.'
+                      : 'This task is due tomorrow.',
+              }
+            : null,
+          task.nextCheckpoint
+            ? {
+                type: 'checkpoint',
+                date: task.nextCheckpoint,
+                title: `Checkpoint ${daysUntil(task.nextCheckpoint) < 0 ? 'missed' : daysUntil(task.nextCheckpoint) === 0 ? 'today' : 'tomorrow'}: ${task.title}`,
+                body:
+                  daysUntil(task.nextCheckpoint) < 0
+                    ? `This checkpoint is overdue. Target date was ${new Date(`${task.nextCheckpoint}T00:00:00`).toLocaleDateString()}.`
+                    : daysUntil(task.nextCheckpoint) === 0
+                      ? 'This checkpoint is scheduled for today.'
+                      : 'This checkpoint is scheduled for tomorrow.',
+              }
+            : null,
+        ].filter((item): item is { type: 'deadline' | 'checkpoint'; date: string; title: string; body: string } => Boolean(item))
+
+        for (const candidate of candidates) {
+          const deltaDays = daysUntil(candidate.date)
+          if (deltaDays < -1 || deltaDays > 1) continue
+
+          const notificationKey = `${task.id}:${candidate.type}:${candidate.date}`
+          if (nextSentKeys.has(notificationKey)) continue
+
+          new Notification(candidate.title, {
+            body: candidate.body,
+            tag: notificationKey,
+            requireInteraction: deltaDays < 0,
+          })
+          nextSentKeys.add(notificationKey)
+        }
+      }
+
+      if (!cancelled && nextSentKeys.size !== sentKeys.size) {
+        await db.settings.put({ key: 'notifications.sent', value: encodeNotificationKeys(Array.from(nextSentKeys)) })
+      }
+    }
+
+    void checkTaskNotifications()
+    const intervalId = window.setInterval(() => void checkTaskNotifications(), NOTIFICATION_CHECK_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [notificationPermission, notificationsEnabled, tasks])
 
   useEffect(() => {
     if (!activeLog) return
@@ -1126,6 +1233,50 @@ function App() {
     await db.settings.put({ key: 'alerts.enabled', value: String(value) })
   }
 
+  async function toggleNotifications(value: boolean) {
+    if (!value) {
+      setNotificationsEnabled(false)
+      setNotificationMessage('Task notifications disabled.')
+      await db.settings.put({ key: 'notifications.enabled', value: 'false' })
+      return
+    }
+
+    if (!isNotificationSupported()) {
+      setNotificationsEnabled(false)
+      setNotificationPermission('unsupported')
+      setNotificationMessage('This device/browser does not support web notifications.')
+      await db.settings.put({ key: 'notifications.enabled', value: 'false' })
+      return
+    }
+
+    const permission = await Notification.requestPermission()
+    setNotificationPermission(permission)
+
+    if (permission !== 'granted') {
+      setNotificationsEnabled(false)
+      setNotificationMessage(permission === 'denied' ? 'Notifications were blocked. Enable them in browser/device settings.' : 'Notification permission was not granted.')
+      await db.settings.put({ key: 'notifications.enabled', value: 'false' })
+      return
+    }
+
+    setNotificationsEnabled(true)
+    setNotificationMessage('Task notifications enabled on this device.')
+    await db.settings.put({ key: 'notifications.enabled', value: 'true' })
+  }
+
+  async function sendTestNotification() {
+    if (!isNotificationSupported() || notificationPermission !== 'granted') {
+      setNotificationMessage('Enable notifications first on this device.')
+      return
+    }
+
+    new Notification('RocketTask test notification', {
+      body: 'Notifications are working for deadlines and checkpoints on this device.',
+      tag: 'rockettask-test-notification',
+    })
+    setNotificationMessage('Test notification sent.')
+  }
+
   if (authState === 'loading') return <div className="mx-auto min-h-screen max-w-xl p-6 text-slate-200">Loading…</div>
 
   if (authState !== 'ready') {
@@ -1347,6 +1498,34 @@ function App() {
               <div className="grid gap-3 md:grid-cols-2">
                 <input className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" placeholder="AI API key (optional)" value={aiApiKey} onChange={(event) => setAiApiKey(event.target.value)} />
                 <input className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" placeholder="AI model" value={aiModel} onChange={(event) => setAiModel(event.target.value)} />
+              </div>
+              <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-slate-100">Task notifications</p>
+                    <p className="text-xs text-slate-400">Get device notifications for overdue, today, and tomorrow task deadlines/checkpoints on this device.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className={`rounded-lg border px-3 py-2 text-sm ${notificationsEnabled ? 'border-emerald-500 text-emerald-200' : 'border-slate-600 text-slate-300'}`}
+                    onClick={() => void toggleNotifications(!notificationsEnabled)}
+                  >
+                    {notificationsEnabled ? 'Notifications on' : 'Enable notifications'}
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="rounded-full border border-slate-700 px-2 py-1 text-slate-300">Permission: {notificationPermission}</span>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-cyan-500 px-3 py-1.5 text-cyan-100 disabled:opacity-50"
+                    onClick={() => void sendTestNotification()}
+                    disabled={!notificationsEnabled || notificationPermission !== 'granted'}
+                  >
+                    Send test notification
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500">On iPhone/iPad, web notifications usually work best after installing RocketTask to the Home Screen and allowing notifications when prompted.</p>
+                {notificationMessage ? <p className="text-sm text-emerald-300">{notificationMessage}</p> : null}
               </div>
               <textarea className="h-24 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100" placeholder="Paste Jira text or CSV (Summary,Labels,Description...)" value={jiraImportInput} onChange={(event) => setJiraImportInput(event.target.value)} />
               <div className="flex items-center gap-2"><button type="button" className="rounded-lg border border-amber-500 px-3 py-2 text-sm text-amber-100" onClick={() => void importJiraTasks()}>Import Jira tasks</button>{jiraImportMessage ? <p className="text-sm text-emerald-300">{jiraImportMessage}</p> : null}</div>
