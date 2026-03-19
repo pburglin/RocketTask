@@ -117,6 +117,10 @@ npm run test
 npm run build
 ```
 
+## Offline Mode
+
+RocketTask now caches the app shell so it can open without an internet connection. Core task features run locally from IndexedDB. AI features require connectivity and will show an error when offline.
+
 ## PWA Install Notes
 
 - **iPhone Safari:** Share → **Add to Home Screen**
