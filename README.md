@@ -2,6 +2,8 @@
 
 RocketTask is a fast, mobile-first agile task tool focused on one thing: turning daily work into visible momentum.
 
+**Live app:** https://rockettask.netlify.app
+
 Built with React + TypeScript + Vite, it runs entirely in the browser with no backend database.
 
 ## Screenshots
