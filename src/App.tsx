@@ -920,7 +920,10 @@ function App() {
     setAiTaskError('')
     setAiTaskMessage('')
     try {
-      const prompt = `You are a task generator for RocketTask. Based on the user request, return ONLY valid JSON with the schema:\n{\n  "tasks": [\n    {\n      "title": "string",\n      "description": "string (optional)",\n      "tags": ["string", "string"],\n      "deadline": "YYYY-MM-DD or null",\n      "nextCheckpoint": "YYYY-MM-DD or null",\n      "nextAction": "string (optional)",\n      "priority": 1-10 or null,\n      "loe": 1-10 or null\n    }\n  ]\n}\nRules: Always include at least 3 tasks. Tags should be short and relevant. If a date is unknown, use null. Do not include markdown or extra text.\n\nUser request:\n${requestText}`
+      const now = new Date()
+      const nowIso = now.toISOString()
+      const nowLocal = now.toLocaleString()
+      const prompt = `You are a task generator for RocketTask. Based on the user request, return ONLY valid JSON with the schema:\n{\n  "tasks": [\n    {\n      "title": "string",\n      "description": "string (optional)",\n      "tags": ["string", "string"],\n      "deadline": "YYYY-MM-DD or null",\n      "nextCheckpoint": "YYYY-MM-DD or null",\n      "nextAction": "string (optional)",\n      "priority": 1-10 or null,\n      "loe": 1-10 or null\n    }\n  ]\n}\nCurrent date/time: ${nowIso} (local: ${nowLocal}). Use this timestamp to set realistic deadlines and checkpoints in the future.\nRules: Always include at least 3 tasks. Tags should be short and relevant. If a date is unknown, use null. Deadlines/checkpoints must be in the future relative to the current date/time unless the user explicitly requests a past date. Do not include markdown or extra text.\n\nUser request:\n${requestText}`
 
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
@@ -1228,6 +1231,44 @@ function App() {
     window.location.href = `mailto:?subject=${subject}&body=${body}`
   }
 
+  function emailFilteredTasks() {
+    const now = new Date()
+    const statusCounts = {
+      todo: filteredTasks.filter((task) => task.status === 'todo').length,
+      in_progress: filteredTasks.filter((task) => task.status === 'in_progress').length,
+      done: filteredTasks.filter((task) => task.status === 'done').length,
+    }
+
+    const taskLines = filteredTasks.map((task) => {
+      const meta: string[] = [task.status.replace('_', ' ')]
+      if (task.deadline) meta.push(`due ${new Date(task.deadline).toLocaleDateString()}`)
+      if (task.nextCheckpoint) meta.push(`checkpoint ${new Date(task.nextCheckpoint).toLocaleDateString()}`)
+      if (task.priority) meta.push(`P${task.priority}`)
+      if (task.loe) meta.push(`LOE ${task.loe}`)
+      const tags = task.tags.length ? `#${task.tags.join(' #')}` : ''
+      const description = task.id ? descriptionByTask[task.id] ?? '' : ''
+      const header = `- ${task.title}${meta.length ? ` (${meta.join(' • ')})` : ''}${tags ? ` ${tags}` : ''}`
+      return description ? `${header}\n  ${description}` : header
+    })
+
+    const lines: string[] = [
+      'RocketTask filtered tasks',
+      `Generated: ${now.toLocaleString()}`,
+      `Visible: ${filteredTasks.length} | Todo: ${statusCounts.todo} | In progress: ${statusCounts.in_progress} | Done: ${statusCounts.done}`,
+      '',
+      'Tasks:',
+      ...(taskLines.length ? taskLines : ['- No tasks matched the current filters.']),
+    ]
+
+    if (aiPlanText && showAiPlan) {
+      lines.push('', 'AI Daily Plan:', aiPlanText)
+    }
+
+    const subject = encodeURIComponent(`RocketTask filtered tasks (${now.toLocaleDateString()})`)
+    const body = encodeURIComponent(lines.join('\n'))
+    window.location.href = `mailto:?subject=${subject}&body=${body}`
+  }
+
   async function toggleAlerts(value: boolean) {
     setAlertEnabled(value)
     await db.settings.put({ key: 'alerts.enabled', value: String(value) })
@@ -1353,6 +1394,13 @@ function App() {
               disabled={aiTaskBusy}
             >
               {aiTaskBusy ? 'Generating…' : 'AI Task Generator'}
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border border-emerald-500 px-3 py-1.5 text-xs text-emerald-100 transition-colors hover:bg-emerald-500/10"
+              onClick={emailFilteredTasks}
+            >
+              Email
             </button>
             {aiPlanText && showAiPlan ? (
               <button
